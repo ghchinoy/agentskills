@@ -130,6 +130,9 @@ bd prime                # Refresh Beads context
 
 For future agents maintaining or compiling `agentskills`:
 
+### 0. Tooling & File Writing Guardrails
+* **Source Code vs. Artifacts:** When creating or writing project source code files to the repository, do NOT populate the `ArtifactMetadata` parameter in `write_to_file`. The `ArtifactMetadata` parameter is strictly reserved for user-facing markdown reports/plans and requires target files to be saved within the session's artifact directory.
+
 ### 1. Releasing with GoReleaser
 * **Dry-Run Testing:** To test cross-compilation without publishing, always run GoReleaser in snapshot mode:
   ```bash
