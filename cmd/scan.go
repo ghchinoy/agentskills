@@ -23,8 +23,8 @@ var (
 // scanCmd represents the scan command
 var scanCmd = &cobra.Command{
 	Use:   "scan",
-	Short: "Scan and analyze agent files (GEMINI.md) for skills",
-	Long: `Scan local directories or public GitHub repositories for GEMINI.md files,
+	Short: "Scan and analyze agent instruction and rule files for skills",
+	Long: `Scan local directories or public GitHub repositories for agent instruction and rule files (such as GEMINI.md, CLAUDE.md, AGENTS.md, or .cursorrules),
 analyze them using gemini-3.5-flash, extract skills, and generate a consolidation report.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Use default from config if not specified

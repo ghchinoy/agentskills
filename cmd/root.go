@@ -21,7 +21,7 @@ var rootCmd = &cobra.Command{
 	Use:     "agentskills",
 	Short:   "agentskills is a CLI tool to extract, categorize, and combine AI agent skills",
 	Version: Version,
-	Long: `agentskills parses GEMINI.md files from local directories or GitHub repositories,
+	Long: `agentskills parses workspace-level agent rule files (GEMINI.md, CLAUDE.md, AGENTS.md, .cursorrules, etc.) from local directories or GitHub repositories,
 uses gemini-3.5-flash to analyze coding agent conventions, quality gates, and tech stacks,
 extracts core capabilities, and recommends how to consolidate them into cohesive skills.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
