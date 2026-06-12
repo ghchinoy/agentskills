@@ -4,3 +4,11 @@
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Binaries
+/bin/
+/agentskills
+
+# Generated Reports
+/reports/
+skills_report.md
