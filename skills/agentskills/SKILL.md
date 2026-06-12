@@ -55,7 +55,7 @@ Before calling Vertex AI or the Gemini API, confirm the backend configuration is
 *Expected default values:*
 *   `backend`: `vertex`
 *   `location`: `global`
-*   `project_id`: your verified GCP Project ID
+*   `project_id`: your active GCP Project ID (auto-detected if unset)
 
 ---
 
@@ -80,6 +80,30 @@ To perform deep codebase analysis (cloning remote repositories or scanning local
 ./bin/agentskills scan --github <target-username> --deep -o ./reports/deep_skills_report.md
 ```
 
+### Programmatic JSON Outputs (For Consuming Agents)
+For automated agent workflows, run scans with the `--json` flag. This outputs clean structured JSON to `stdout` (suitable for piping to `jq` or custom tools) while printing status logs to `stderr`:
+```bash
+./bin/agentskills scan --local . --json -o ./reports/my_report.md
+```
+**JSON Schema:**
+```json
+{
+  "files": [
+    {
+      "source": "local|github",
+      "name": "File display name",
+      "path": "/absolute/path/to/rule/file",
+      "tokens": 1234
+    }
+  ],
+  "total_input_tokens": 1234,
+  "report_tokens": 3400,
+  "reduction_percentage": -45.0,
+  "report": "# Markdown report content...",
+  "output_file": "./reports/my_report.md"
+}
+```
+
 ### Force Cache Refresh
 To bypass local cached copies of `GEMINI.md` files (stored under `~/.cache/agentskills/`) and perform a fresh download from GitHub raw CDN:
 ```bash
@@ -93,3 +117,5 @@ To bypass local cached copies of `GEMINI.md` files (stored under `~/.cache/agent
 1.  **Never Check in Reports:** All generated reports (e.g. `skills_report.md` or files inside `./reports/`) are dynamically generated run outputs. **Do NOT commit them to Git.**
 2.  **API Rate Limiting:** Avoid using `--force-refresh` repeatedly to prevent hitting public GitHub API endpoints. Leverage the default local XDG cache where possible.
 3.  **ADC Validation:** If you encounter `credentials not found` or `404 Not Found` API errors, ensure that `gcloud auth application-default login` is valid and the `aiplatform.googleapis.com` service is fully enabled on the active Google Cloud project.
+4.  **Auto-created Directories:** The tool automatically runs `os.MkdirAll` on the parent directories of the output path (`-o`). Consuming agents do not need to call `mkdir` manually before saving.
+5.  **GCP Project Auto-detection:** If the `project_id` key in the configuration is empty, the tool will query `gcloud config get-value project` and automatically save the active project to the config, eliminating configuration friction.
