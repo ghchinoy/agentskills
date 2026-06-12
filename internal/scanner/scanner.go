@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -21,7 +22,7 @@ type AgentFile struct {
 }
 
 // LocalScanner recursively searches a local directory for GEMINI.md files.
-func LocalScanner(root string) ([]AgentFile, error) {
+func LocalScanner(root string, deep bool) ([]AgentFile, error) {
 	var files []AgentFile
 
 	absRoot, err := filepath.Abs(root)
@@ -50,11 +51,17 @@ func LocalScanner(root string) ([]AgentFile, error) {
 			}
 
 			dirName := filepath.Base(filepath.Dir(path))
+			fileContent := string(content)
+
+			if deep {
+				fileContent += extractSupplementaryContext(filepath.Dir(path))
+			}
+
 			files = append(files, AgentFile{
 				Source:  "local",
 				Name:    dirName,
 				Path:    path,
-				Content: string(content),
+				Content: fileContent,
 			})
 		}
 
@@ -75,7 +82,7 @@ type GitHubRepo struct {
 }
 
 // GitHubScanner fetches GEMINI.md files from all active public repositories of a given user.
-func GitHubScanner(username string, forceRefresh bool) ([]AgentFile, error) {
+func GitHubScanner(username string, forceRefresh bool, deep bool) ([]AgentFile, error) {
 	var files []AgentFile
 
 	cacheDir, err := config.GetCacheDir()
@@ -101,43 +108,64 @@ func GitHubScanner(username string, forceRefresh bool) ([]AgentFile, error) {
 	// 2. Fetch GEMINI.md for each repository (using cache where possible)
 	for _, repo := range repos {
 		cachePath := filepath.Join(userCacheDir, fmt.Sprintf("%s_GEMINI.md", repo.Name))
+		var hasGemini bool
+		var geminiContent string
 
 		// Check cache
 		if !forceRefresh {
 			if data, err := os.ReadFile(cachePath); err == nil {
-				files = append(files, AgentFile{
-					Source:  "github",
-					Name:    repo.Name,
-					Path:    fmt.Sprintf("https://github.com/%s/%s/blob/main/GEMINI.md", username, repo.Name),
-					Content: string(data),
-				})
-				continue
+				hasGemini = true
+				geminiContent = string(data)
 			}
 		}
 
-		// Download from GitHub
-		fmt.Printf("Fetching GEMINI.md for %s/%s...\n", username, repo.Name)
-		content, found, err := downloadGEMINI(username, repo.Name)
-		if err != nil {
-			fmt.Printf("  ⚠ Error downloading for %s: %v\n", repo.Name, err)
-			continue
+		if !hasGemini {
+			// Download from GitHub
+			fmt.Printf("Fetching GEMINI.md for %s/%s...\n", username, repo.Name)
+			content, found, err := downloadGEMINI(username, repo.Name)
+			if err != nil {
+				fmt.Printf("  ⚠ Error downloading for %s: %v\n", repo.Name, err)
+				continue
+			}
+
+			if found {
+				hasGemini = true
+				geminiContent = content
+				// Write to cache
+				if err := os.WriteFile(cachePath, []byte(content), 0644); err != nil {
+					fmt.Printf("  ⚠ Warning: failed to cache GEMINI.md for %s: %v\n", repo.Name, err)
+				}
+			}
 		}
 
-		if !found {
-			continue
-		}
+		if hasGemini {
+			// If deep is true, we clone the repository and extract metadata
+			if deep {
+				fmt.Printf("Performing deep checkout for %s/%s...\n", username, repo.Name)
+				tempDir, err := os.MkdirTemp("", fmt.Sprintf("agentskills-clone-%s-*", repo.Name))
+				if err == nil {
+					cloneURL := fmt.Sprintf("https://github.com/%s/%s.git", username, repo.Name)
+					cmd := exec.Command("git", "clone", "--depth", "1", cloneURL, tempDir)
+					if err := cmd.Run(); err == nil {
+						// Extract supplementary context from the cloned directory
+						geminiContent += extractSupplementaryContext(tempDir)
+					} else {
+						fmt.Printf("  ⚠ Warning: failed to clone repository %s: %v\n", repo.Name, err)
+					}
+					// Always clean up tempDir
+					os.RemoveAll(tempDir)
+				} else {
+					fmt.Printf("  ⚠ Warning: failed to create temporary directory for clone: %v\n", err)
+				}
+			}
 
-		// Write to cache
-		if err := os.WriteFile(cachePath, []byte(content), 0644); err != nil {
-			fmt.Printf("  ⚠ Warning: failed to cache GEMINI.md for %s: %v\n", repo.Name, err)
+			files = append(files, AgentFile{
+				Source:  "github",
+				Name:    repo.Name,
+				Path:    fmt.Sprintf("https://github.com/%s/%s/blob/main/GEMINI.md", username, repo.Name),
+				Content: geminiContent,
+			})
 		}
-
-		files = append(files, AgentFile{
-			Source:  "github",
-			Name:    repo.Name,
-			Path:    fmt.Sprintf("https://github.com/%s/%s/blob/main/GEMINI.md", username, repo.Name),
-			Content: content,
-		})
 	}
 
 	return files, nil
@@ -250,4 +278,104 @@ func loadFromCache(userCacheDir string) ([]AgentFile, error) {
 	}
 
 	return files, nil
+}
+
+// extractSupplementaryContext extracts directory structures, Makefiles, package dependencies,
+// and sample scripts to enrich AgentFile analysis context.
+func extractSupplementaryContext(root string) string {
+	var sb strings.Builder
+	sb.WriteString("\n\n---\n## Supplementary Codebase Context (Deep Scan)\n\n")
+
+	// 1. Directory list (top-level and 1-level deep)
+	sb.WriteString("### Directory Structure:\n")
+	entries, err := os.ReadDir(root)
+	if err == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			if name == ".git" || name == ".beads" || name == "node_modules" || name == "vendor" {
+				continue
+			}
+			if entry.IsDir() {
+				sb.WriteString(fmt.Sprintf("- %s/\n", name))
+				subEntries, err := os.ReadDir(filepath.Join(root, name))
+				if err == nil {
+					for idx, sub := range subEntries {
+						if idx >= 5 {
+							sb.WriteString(fmt.Sprintf("  - ... (%d more files)\n", len(subEntries)-5))
+							break
+						}
+						sb.WriteString(fmt.Sprintf("  - %s/%s\n", name, sub.Name()))
+					}
+				}
+			} else {
+				sb.WriteString(fmt.Sprintf("- %s\n", name))
+			}
+		}
+	}
+	sb.WriteString("\n")
+
+	// 2. Build files (Makefile or taskfile)
+	makefiles := []string{"Makefile", "makefile", "taskfile.yaml", "taskfile.yml"}
+	for _, mf := range makefiles {
+		p := filepath.Join(root, mf)
+		if data, err := os.ReadFile(p); err == nil {
+			sb.WriteString(fmt.Sprintf("### Build Configuration (%s):\n```\n", mf))
+			lines := strings.Split(string(data), "\n")
+			if len(lines) > 80 {
+				sb.WriteString(strings.Join(lines[:80], "\n"))
+				sb.WriteString("\n... (truncated)\n")
+			} else {
+				sb.WriteString(string(data))
+			}
+			sb.WriteString("\n```\n\n")
+			break
+		}
+	}
+
+	// 3. Package/Dependency files
+	depFiles := []string{"go.mod", "package.json", "Cargo.toml", "requirements.txt", "Gemfile"}
+	for _, df := range depFiles {
+		p := filepath.Join(root, df)
+		if data, err := os.ReadFile(p); err == nil {
+			sb.WriteString(fmt.Sprintf("### Project Dependencies (%s):\n```json\n", df))
+			lines := strings.Split(string(data), "\n")
+			if len(lines) > 80 {
+				sb.WriteString(strings.Join(lines[:80], "\n"))
+				sb.WriteString("\n... (truncated)\n")
+			} else {
+				sb.WriteString(string(data))
+			}
+			sb.WriteString("\n```\n\n")
+		}
+	}
+
+	// 4. Sample Scripts
+	scriptDirs := []string{"scripts", "bin", "tools"}
+	for _, sd := range scriptDirs {
+		dirPath := filepath.Join(root, sd)
+		if info, err := os.Stat(dirPath); err == nil && info.IsDir() {
+			sEntries, err := os.ReadDir(dirPath)
+			if err == nil {
+				for _, se := range sEntries {
+					if !se.IsDir() && (strings.HasSuffix(se.Name(), ".sh") || strings.HasSuffix(se.Name(), ".py") || strings.HasSuffix(se.Name(), ".go")) {
+						scriptPath := filepath.Join(dirPath, se.Name())
+						if sData, err := os.ReadFile(scriptPath); err == nil {
+							sb.WriteString(fmt.Sprintf("### Sample Script (%s/%s):\n```bash\n", sd, se.Name()))
+							lines := strings.Split(string(sData), "\n")
+							if len(lines) > 80 {
+								sb.WriteString(strings.Join(lines[:80], "\n"))
+								sb.WriteString("\n... (truncated)\n")
+							} else {
+								sb.WriteString(string(sData))
+							}
+							sb.WriteString("\n```\n\n")
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return sb.String()
 }

@@ -22,9 +22,16 @@ AI agents should invoke this skill when:
 
 ## 🛠️ Execution & Commands
 
+### 0. Download & Installation (If CLI is Missing)
+If the `agentskills` CLI is not installed on the system, download and install the latest release with:
+```bash
+curl -fsSL https://raw.githubusercontent.com/ghchinoy/agentskills/main/install.sh | bash
+```
+This script resolves the latest GitHub release, downloads and extracts the appropriate binary for your system architecture, installs it to `/usr/local/bin` (falling back to `~/.local/bin`), and registers the global agent skills to `~/.config/agentskills/skills/`.
+
 ### 1. Locate the Binary
-*   Always compile the latest state inside the repository directory using `make build`.
-*   Always invoke the compiled binary using its local directory path: `./bin/agentskills`.
+*   When working directly in the development repository, compile the latest state using `make build` and invoke the compiled binary using its local path: `./bin/agentskills`.
+*   If installed globally via the script, invoke it directly as `agentskills`.
 
 ### 2. Verify Config State
 Before calling Vertex AI or the Gemini API, confirm the backend configuration is correct:
@@ -51,6 +58,12 @@ To compile an agent landscape, tech stack, and duplication analysis of a public 
 To map and analyze local developer files on your computer recursively:
 ```bash
 ./bin/agentskills scan --local <path-to-directory> -o ./reports/local_skills_report.md
+```
+
+### Deep Codebase Analysis (Deep Scan)
+To perform deep codebase analysis (cloning remote repositories or scanning local build files to extract file structures, project dependencies like `go.mod` or `package.json`, and sample scripts to enrich analysis):
+```bash
+./bin/agentskills scan --github <target-username> --deep -o ./reports/deep_skills_report.md
 ```
 
 ### Force Cache Refresh

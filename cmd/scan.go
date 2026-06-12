@@ -17,6 +17,7 @@ var (
 	localScan    string
 	outputFile   string
 	forceRefresh bool
+	deepScan     bool
 )
 
 // scanCmd represents the scan command
@@ -41,7 +42,7 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 
 		if localScan != "" {
 			fmt.Printf("Scanning local path: %s...\n", localScan)
-			localFiles, err := scanner.LocalScanner(localScan)
+			localFiles, err := scanner.LocalScanner(localScan, deepScan)
 			if err != nil {
 				return fmt.Errorf("local scan failed: %w", err)
 			}
@@ -51,7 +52,7 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 
 		if githubScan != "" {
 			fmt.Printf("Scanning GitHub profile: %s...\n", githubScan)
-			githubFiles, err := scanner.GitHubScanner(githubScan, forceRefresh)
+			githubFiles, err := scanner.GitHubScanner(githubScan, forceRefresh, deepScan)
 			if err != nil {
 				return fmt.Errorf("GitHub scan failed: %w", err)
 			}
@@ -78,6 +79,20 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 			return err
 		}
 
+		// Calculate input token statistics
+		fmt.Println("\n=== Token & Context Statistics ===")
+		var totalInputTokens int
+		for _, f := range allFiles {
+			tokens, err := ai.CountTokens(ctx, client, f.Content)
+			if err != nil {
+				fmt.Printf("  - [%s] %s: (unable to count tokens: %v)\n", f.Source, f.Name, err)
+				continue
+			}
+			fmt.Printf("  - [%s] %s: %d tokens\n", f.Source, f.Name, tokens)
+			totalInputTokens += tokens
+		}
+		fmt.Printf("Total input context footprint: %d tokens\n", totalInputTokens)
+
 		// 4. Generate the Consolidation Report
 		fmt.Println("\nAnalysing files with gemini-3.5-flash...")
 		report, err := ai.GenerateSkillsReport(ctx, client, allFiles)
@@ -88,6 +103,16 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 		// 5. Write report to output file
 		if err := os.WriteFile(outputFile, []byte(report), 0644); err != nil {
 			return fmt.Errorf("failed to write consolidation report to %q: %w", outputFile, err)
+		}
+
+		// Calculate generated report token count
+		reportTokens, err := ai.CountTokens(ctx, client, report)
+		if err == nil {
+			fmt.Printf("Consolidated report size: %d tokens\n", reportTokens)
+			if totalInputTokens > 0 {
+				reduction := float64(totalInputTokens-reportTokens) / float64(totalInputTokens) * 100
+				fmt.Printf("Instruction context footprint change: %.1f%%\n", reduction)
+			}
 		}
 
 		fmt.Printf("\n✓ Success! Consolidation report generated successfully.\n")
@@ -102,6 +127,7 @@ func init() {
 	scanCmd.Flags().StringVar(&localScan, "local", "", "Scan this local path (e.g. '.' or specific directory) recursively")
 	scanCmd.Flags().StringVarP(&outputFile, "output", "o", "./skills_report.md", "Target path for the generated markdown report")
 	scanCmd.Flags().BoolVarP(&forceRefresh, "force-refresh", "f", false, "Force refresh GitHub CDN downloads (bypass local XDG cache)")
+	scanCmd.Flags().BoolVarP(&deepScan, "deep", "d", false, "Perform deep repository/codebase scanning to extract dependencies, build structures, and script details")
 
 	rootCmd.AddCommand(scanCmd)
 }

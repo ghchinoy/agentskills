@@ -88,3 +88,20 @@ Your report must contain the following sections formatted in beautiful, high-qua
 
 	return reportText, nil
 }
+
+// CountTokens counts the number of tokens in the given text using gemini-3.5-flash.
+func CountTokens(ctx context.Context, client *genai.Client, text string) (int, error) {
+	contents := []*genai.Content{
+		{
+			Parts: []*genai.Part{
+				{Text: text},
+			},
+		},
+	}
+	resp, err := client.Models.CountTokens(ctx, ModelName, contents, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count tokens: %w", err)
+	}
+	return int(resp.TotalTokens), nil
+}
+
