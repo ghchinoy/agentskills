@@ -110,6 +110,16 @@ To bypass local cached copies of `GEMINI.md` files (stored under `~/.cache/agent
 ./bin/agentskills scan --force-refresh
 ```
 
+### Querying the Discovered Skills Catalog
+The tool automatically compiles and updates a persistent catalog of all unique discovered skills under `~/.config/agentskills/catalog.json` on every scan. Consuming agents can inspect this registry without making any AI or network calls:
+```bash
+# Print a formatted human-readable list of all registered capabilities
+agentskills catalog
+
+# Retrieve the raw catalog database JSON for programmatic filtering
+agentskills catalog --json
+```
+
 ---
 
 ## ⚠️ Hygiene & Safety Gates
@@ -119,3 +129,7 @@ To bypass local cached copies of `GEMINI.md` files (stored under `~/.cache/agent
 3.  **ADC Validation:** If you encounter `credentials not found` or `404 Not Found` API errors, ensure that `gcloud auth application-default login` is valid and the `aiplatform.googleapis.com` service is fully enabled on the active Google Cloud project.
 4.  **Auto-created Directories:** The tool automatically runs `os.MkdirAll` on the parent directories of the output path (`-o`). Consuming agents do not need to call `mkdir` manually before saving.
 5.  **GCP Project Auto-detection:** If the `project_id` key in the configuration is empty, the tool will query `gcloud config get-value project` and automatically save the active project to the config, eliminating configuration friction.
+6.  **Scale Safety Gate:** Scans are capped at 10 files to prevent API rate-limiting and context window bloat. If a recursive scan path yields more than 10 agent rule files, the command will fail. To bypass this check for broad scans, pass the `--force-scan` flag:
+    ```bash
+    agentskills scan --local /path --force-scan
+    ```
