@@ -12,3 +12,7 @@
 # Generated Reports
 /reports/
 skills_report.md
+
+# Development / Distribution
+/scratch/
+/dist/
