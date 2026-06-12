@@ -125,3 +125,26 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## 🛠️ Development, Maintenance & Release Guidelines
+
+For future agents maintaining or compiling `agentskills`:
+
+### 1. Releasing with GoReleaser
+* **Dry-Run Testing:** To test cross-compilation without publishing, always run GoReleaser in snapshot mode:
+  ```bash
+  goreleaser release --snapshot --clean
+  ```
+* **Git Cleanliness:** GoReleaser requires a clean Git state. Do NOT track `./scratch/` or `./dist/` files; ensure they remain ignored in `.gitignore`.
+* **Tag Matching:** GoReleaser builds the exact commit pointed to by the tag. If you commit changes (e.g. document edits, code fixes) after tagging, you must delete and recreate the local and remote git tag to point to the newest HEAD commit before running GoReleaser.
+
+### 2. credentials & Authentication
+* **GCP Credentials:** When running or verifying scanning commands, ensure Application Default Credentials (ADC) are active:
+  ```bash
+  gcloud auth application-default login
+  ```
+* **GitHub Releases:** GoReleaser requires a valid `GITHUB_TOKEN` set in the environment with `Contents: Read & write` scopes.
+
+### 3. Dolt Sync & Branch Hygiene
+* **Ignore Dolt Remote Branches:** You may see Pull Requests on GitHub for branches like `__dolt_remote_info__`. These are internal metadata branches used by Dolt's sync protocol. Do NOT attempt to merge or delete these branches; ignore them completely.
+
