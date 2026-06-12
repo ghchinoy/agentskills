@@ -1,9 +1,12 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/adrg/xdg"
 	"github.com/spf13/viper"
@@ -77,6 +80,14 @@ func InitConfig() (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal configuration: %w", err)
 	}
 
+	if cfg.ProjectID == "" {
+		if project := DetectGCPProject(); project != "" {
+			cfg.ProjectID = project
+			viper.Set("project_id", project)
+			_ = SaveConfig()
+		}
+	}
+
 	return &cfg, nil
 }
 
@@ -87,4 +98,19 @@ func SaveConfig() error {
 		return err
 	}
 	return viper.WriteConfigAs(configPath)
+}
+
+// DetectGCPProject attempts to query the active gcloud configuration for the project ID.
+func DetectGCPProject() string {
+	cmd := exec.Command("gcloud", "config", "get-value", "project")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		project := strings.TrimSpace(stdout.String())
+		if project != "" && !strings.Contains(project, "unset") {
+			return project
+		}
+	}
+	return ""
 }
