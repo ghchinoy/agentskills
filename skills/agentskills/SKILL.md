@@ -99,7 +99,33 @@ For automated agent workflows, run scans with the `--json` flag. This outputs cl
   "total_input_tokens": 1234,
   "report_tokens": 3400,
   "reduction_percentage": -45.0,
-  "report": "# Markdown report content...",
+  "report": {
+    "summary": {
+      "key_findings": ["string"],
+      "tech_stack": ["string"]
+    },
+    "skills": [
+      {
+        "name": "string",
+        "description": "string",
+        "capabilities": ["string"]
+      }
+    ],
+    "duplications": [
+      {
+        "description": "string",
+        "files_affected": ["string"]
+      }
+    ],
+    "structure_recommendations": [
+      {
+        "file": "string",
+        "target_directory": "scripts|references|assets",
+        "recommendation": "string",
+        "rationale": "string"
+      }
+    ]
+  },
   "output_file": "./reports/my_report.md"
 }
 ```

@@ -96,3 +96,9 @@ During verification and dry-runs on the user's 246 repositories, we encountered 
 *   **Catalog Database:** Creates a local database at `~/.config/agentskills/catalog.json` using XDG specifications.
 *   **Upsert & Merging Logic:** When a scan finishes, unique skills are extracted from the structured LLM analysis, merged with existing catalog entries (deduplicating capabilities and aggregating sources), and saved.
 *   **Catalog Querying:** Added the `agentskills catalog` command to view or output the catalog as raw JSON for consuming agents.
+
+---
+
+## 📂 Phase 8: Progressive Disclosure Spec Alignment
+*   **Agent Skills Spec Alignment:** Refactored prompts in `internal/ai/analysis.go` to explicitly check discovered rule files against the `agentskills.io` size guidelines (instructions under 5,000 tokens / 500 lines).
+*   **Directory Split Recommendations:** Scans now recommend splitting rules into `scripts/`, `references/`, or `assets/` subfolders if they contain long inline scripts, dense tables, or secondary documentation.

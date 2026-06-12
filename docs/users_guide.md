@@ -172,6 +172,14 @@ To prevent accidental API rate-limiting or large context token charges, scans ar
 ./bin/agentskills scan --local /broad/path --force-scan
 ```
 
+### 8. Progressive Disclosure & Spec Alignment
+In accordance with the [Agent Skills Specification](https://agentskills.io/specification.md), rule files should follow progressive disclosure (keeping instructions/`SKILL.md` under 5,000 tokens / 500 lines) to prevent context bloat and ensure fast, accurate agent retrieval.
+
+The `scan` command automatically evaluates each rule file against these limits. If a file is too large or contains dense inline code/tables, the report outputs specific restructuring recommendations:
+*   **`scripts/`**: Recommends extracting inline shell/Python scripts.
+*   **`references/`**: Recommends moving detailed technical instructions, APIs, or secondary specs.
+*   **`assets/`**: Recommends moving configuration profiles, data tables, or templates.
+
 ---
 
 ## 🗄️ Discovered Skills Catalog

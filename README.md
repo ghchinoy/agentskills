@@ -15,6 +15,7 @@ To accommodate diverse developer and agent orchestration standards, the CLI dyna
 * **Scanning Modes**: Scan local directories recursively or crawl public repositories of a GitHub user to locate agent rule files.
 * **Deep Codebase Scan (`--deep`)**: Shallow-clones remote repos or scans local folders to extract build settings (`Makefile`), dependencies (`go.mod`, `package.json`, `Cargo.toml`), and sample scripts to enrich analysis.
 * **Discovered Skills Catalog**: Persists unique discovered skills in a local database at `~/.config/agentskills/catalog.json`, allowing them to be queried instantly without making new scans or AI API calls.
+* **Progressive Disclosure Spec Alignment**: Evaluates rule files against size guidelines in the [Agent Skills Specification](https://agentskills.io/specification.md) and suggests splitting heavy rules into `scripts/`, `references/`, or `assets/` subfolders.
 * **Programmatic JSON Output (`--json`)**: Supports structured JSON outputs for `scan` and `catalog` commands, writing data directly to `stdout` while redirecting status logging to `stderr` (perfect for piping to `jq`).
 * **Scale Safety Gate**: Prevents accidental context bloating and API rate-limiting by halting scans that resolve to more than 10 rule files, unless bypassed with `--force-scan`.
 * **XDG Cache Support**: Caches fetched files under `~/.cache/agentskills/` to reduce API requests and support offline analysis.
