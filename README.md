@@ -14,10 +14,13 @@ To accommodate diverse developer and agent orchestration standards, the CLI dyna
 
 * **Scanning Modes**: Scan local directories recursively or crawl public repositories of a GitHub user to locate agent rule files.
 * **Deep Codebase Scan (`--deep`)**: Shallow-clones remote repos or scans local folders to extract build settings (`Makefile`), dependencies (`go.mod`, `package.json`, `Cargo.toml`), and sample scripts to enrich analysis.
+* **Discovered Skills Catalog**: Persists unique discovered skills in a local database at `~/.config/agentskills/catalog.json`, allowing them to be queried instantly without making new scans or AI API calls.
+* **Programmatic JSON Output (`--json`)**: Supports structured JSON outputs for `scan` and `catalog` commands, writing data directly to `stdout` while redirecting status logging to `stderr` (perfect for piping to `jq`).
+* **Scale Safety Gate**: Prevents accidental context bloating and API rate-limiting by halting scans that resolve to more than 10 rule files, unless bypassed with `--force-scan`.
 * **XDG Cache Support**: Caches fetched files under `~/.cache/agentskills/` to reduce API requests and support offline analysis.
 * **SDK Integration**: Uses the official `google.golang.org/genai` Go SDK to run analysis via Vertex AI or the Gemini API.
-* **Configuration Management**: Uses Cobra and Viper to manage settings in `~/.config/agentskills/config.yaml`.
-* **Report Generation**: Produces a detailed markdown report detailing technologies, task tracking overlaps, and recommended agent skills.
+* **Configuration Management**: Uses Cobra and Viper to manage settings in `~/.config/agentskills/config.yaml`, with automatic active GCP Project ID probing.
+* **Report Generation**: Produces a detailed markdown report detailing technologies, task tracking overlaps, and recommended agent skills, automatically creating nested parent output directories.
 
 ## Installation
 
@@ -65,6 +68,7 @@ The CLI supports both Vertex AI and the Gemini API.
 
 3. Configure your GCP project ID and region:
    ```bash
+   # Optional: project_id is auto-detected from active gcloud config if left blank!
    ./bin/agentskills config set project_id <your-gcp-project-id>
    ./bin/agentskills config set location global
    ```
@@ -81,6 +85,8 @@ If you prefer to use the direct Gemini API:
 
 ## Usage
 
+The CLI commands are grouped into **Operational Commands** (`scan`, `catalog`) and **Configuration Commands** (`config`).
+
 ### Scan a GitHub Profile (Standard Mode)
 
 Scan all public repositories of a GitHub user for standard rule files:
@@ -89,20 +95,32 @@ Scan all public repositories of a GitHub user for standard rule files:
 ./bin/agentskills scan --github <username> -o ./skills_report.md
 ```
 
-### Scan with Deep Codebase Analysis (`--deep`)
+### Scan with Programmatic JSON Output
 
-Performs deep analysis on repositories by cloning/scanning project dependency manifests and sample files:
+Output structured file metadata and LLM-analyzed skills directly to `stdout`:
 
 ```bash
-./bin/agentskills scan --github <username> --deep -o ./skills_report.md
+./bin/agentskills scan --local . --json -o ./reports/my_report.md
 ```
 
-### Scan a Local Directory
+### Bypassing Scale Safety Gates
 
-Scan a local path recursively:
+If a scan path contains more than 10 rule files, use `--force-scan` to bypass the scale safety gate:
 
 ```bash
-./bin/agentskills scan --local /path/to/directory -o ./skills_report.md
+./bin/agentskills scan --local /broad/path --force-scan
+```
+
+### Query Discovered Skills Catalog
+
+View unique agent capabilities registered across previous scans:
+
+```bash
+# Print a formatted human-readable list of registered skills
+./bin/agentskills catalog
+
+# Output the catalog database in raw JSON format
+./bin/agentskills catalog --json
 ```
 
 ### Force Cache Refresh

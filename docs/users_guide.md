@@ -159,3 +159,35 @@ If you have recently added or edited a `GEMINI.md` file in one of your online re
 ```bash
 ./bin/agentskills scan --force-refresh
 ```
+
+### 6. Programmatic JSON Output
+For scripting or automated pipelines, run the scan with the `--json` flag. The tool outputs a structured JSON document of file details and analyzed skills to `stdout` while routing log messages to `stderr`:
+```bash
+./bin/agentskills scan --local . --json -o ./reports/json_report.json
+```
+
+### 7. Scale Safety Gate
+To prevent accidental API rate-limiting or large context token charges, scans are restricted to 10 files. If a recursive scan yields more than 10 agent rule files, it fails. Use the `--force-scan` flag to bypass this gate:
+```bash
+./bin/agentskills scan --local /broad/path --force-scan
+```
+
+---
+
+## 🗄️ Discovered Skills Catalog
+
+`agentskills` maintains a persistent database of all unique discovered skills under the user's XDG config folder (`~/.config/agentskills/catalog.json`). Scans automatically upsert new capabilities and merge duplicate listings.
+
+Consuming agents or human developers can query this database instantly without making network or AI API calls.
+
+### Human-Readable List
+To print a formatted list of all unique skills, their descriptions, capabilities, and sources:
+```bash
+./bin/agentskills catalog
+```
+
+### Programmatic JSON Catalog
+To fetch the raw JSON catalog:
+```bash
+./bin/agentskills catalog --json
+```

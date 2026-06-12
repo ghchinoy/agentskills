@@ -83,3 +83,16 @@ During verification and dry-runs on the user's 246 repositories, we encountered 
 ### 4. Build and Hygiene Automation
 *   We removed all root-level binary files and deployed a clean `Makefile` to target `./bin/` outputs.
 *   Updated `.gitignore` rules to ensure that compiled artifacts remain strictly separated from the repository source history.
+
+---
+
+## 🛠️ Phase 6: Programmatic JSON Output & Safety Gates
+*   **JSON Output Mode (`--json`):** Formats analysis output as structured JSON written to `stdout`. Progress indicators are routed to `os.Stderr` to avoid polluting programmatic data pipelines.
+*   **Scale Safety Gate:** Scans are limited to 10 rule files by default to protect the LLM context window and prevent 429 rate limits, with a `--force-scan` flag added for explicit bypasses.
+
+---
+
+## 🗄️ Phase 7: Persistent Discovered Skills Catalog
+*   **Catalog Database:** Creates a local database at `~/.config/agentskills/catalog.json` using XDG specifications.
+*   **Upsert & Merging Logic:** When a scan finishes, unique skills are extracted from the structured LLM analysis, merged with existing catalog entries (deduplicating capabilities and aggregating sources), and saved.
+*   **Catalog Querying:** Added the `agentskills catalog` command to view or output the catalog as raw JSON for consuming agents.
