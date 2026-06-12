@@ -1,6 +1,6 @@
 package main
 
-import "agentskills/cmd"
+import "github.com/ghchinoy/agentskills/cmd"
 
 func main() {
 	cmd.Execute()

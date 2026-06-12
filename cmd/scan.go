@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"agentskills/internal/ai"
-	"agentskills/internal/scanner"
+	"github.com/ghchinoy/agentskills/internal/ai"
+	"github.com/ghchinoy/agentskills/internal/scanner"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

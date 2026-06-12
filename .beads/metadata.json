@@ -4,6 +4,5 @@
   "dolt_mode": "server",
   "dolt_database": "agentskills",
   "project_id": "8f433709-1426-4324-9a15-fb460e77ad90",
-  "global_dolt_database": "beads_global",
-  "global_project_id": "00000000-0000-0000-0000-000000000000"
+  "global_dolt_database": "beads_global"
 }

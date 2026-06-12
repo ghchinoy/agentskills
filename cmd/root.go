@@ -4,18 +4,17 @@ import (
 	"fmt"
 	"os"
 
-	"agentskills/internal/config"
+	"github.com/ghchinoy/agentskills/internal/config"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 var (
-	cfgFile string
-	cfg     *config.Config
+	cfg *config.Config
 )
 
-var Version = "1.0.0"
+var Version = "1.0.1"
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -76,9 +75,9 @@ func init() {
 	rootCmd.PersistentFlags().String("api-key", "", "Direct Gemini API Key (if using gemini backend)")
 
 	// Bind flags to viper (for default fallbacks when flag is not set explicitly)
-	viper.BindPFlag("project_id", rootCmd.PersistentFlags().Lookup("project"))
-	viper.BindPFlag("location", rootCmd.PersistentFlags().Lookup("location"))
-	viper.BindPFlag("backend", rootCmd.PersistentFlags().Lookup("backend"))
-	viper.BindPFlag("github_user", rootCmd.PersistentFlags().Lookup("github-user"))
-	viper.BindPFlag("api_key", rootCmd.PersistentFlags().Lookup("api-key"))
+	_ = viper.BindPFlag("project_id", rootCmd.PersistentFlags().Lookup("project"))
+	_ = viper.BindPFlag("location", rootCmd.PersistentFlags().Lookup("location"))
+	_ = viper.BindPFlag("backend", rootCmd.PersistentFlags().Lookup("backend"))
+	_ = viper.BindPFlag("github_user", rootCmd.PersistentFlags().Lookup("github-user"))
+	_ = viper.BindPFlag("api_key", rootCmd.PersistentFlags().Lookup("api-key"))
 }

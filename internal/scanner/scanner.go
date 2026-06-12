@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"agentskills/internal/config"
+	"github.com/ghchinoy/agentskills/internal/config"
 )
 
 // AgentFile represents an identified and loaded GEMINI.md file.
@@ -186,7 +186,7 @@ func GitHubScanner(username string, forceRefresh bool, deep bool) ([]AgentFile, 
 						fmt.Printf("  ⚠ Warning: failed to clone repository %s: %v\n", repo.Name, err)
 					}
 					// Always clean up tempDir
-					os.RemoveAll(tempDir)
+					_ = os.RemoveAll(tempDir)
 				} else {
 					fmt.Printf("  ⚠ Warning: failed to create temporary directory for clone: %v\n", err)
 				}
@@ -222,7 +222,7 @@ func fetchGitHubRepos(username string) ([]GitHubRepo, error) {
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode == http.StatusNotFound {
 			return nil, fmt.Errorf("user %q not found on GitHub", username)
@@ -263,7 +263,7 @@ func downloadAgentFile(username, repo, filename string) (string, bool, error) {
 		if err != nil {
 			return "", false, err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode == http.StatusOK {
 			data, err := io.ReadAll(resp.Body)
@@ -345,19 +345,19 @@ func extractSupplementaryContext(root string) string {
 				continue
 			}
 			if entry.IsDir() {
-				sb.WriteString(fmt.Sprintf("- %s/\n", name))
+				fmt.Fprintf(&sb, "- %s/\n", name)
 				subEntries, err := os.ReadDir(filepath.Join(root, name))
 				if err == nil {
 					for idx, sub := range subEntries {
 						if idx >= 5 {
-							sb.WriteString(fmt.Sprintf("  - ... (%d more files)\n", len(subEntries)-5))
+							fmt.Fprintf(&sb, "  - ... (%d more files)\n", len(subEntries)-5)
 							break
 						}
-						sb.WriteString(fmt.Sprintf("  - %s/%s\n", name, sub.Name()))
+						fmt.Fprintf(&sb, "  - %s/%s\n", name, sub.Name())
 					}
 				}
 			} else {
-				sb.WriteString(fmt.Sprintf("- %s\n", name))
+				fmt.Fprintf(&sb, "- %s\n", name)
 			}
 		}
 	}
@@ -368,7 +368,7 @@ func extractSupplementaryContext(root string) string {
 	for _, mf := range makefiles {
 		p := filepath.Join(root, mf)
 		if data, err := os.ReadFile(p); err == nil {
-			sb.WriteString(fmt.Sprintf("### Build Configuration (%s):\n```\n", mf))
+			fmt.Fprintf(&sb, "### Build Configuration (%s):\n```\n", mf)
 			lines := strings.Split(string(data), "\n")
 			if len(lines) > 80 {
 				sb.WriteString(strings.Join(lines[:80], "\n"))
@@ -386,7 +386,7 @@ func extractSupplementaryContext(root string) string {
 	for _, df := range depFiles {
 		p := filepath.Join(root, df)
 		if data, err := os.ReadFile(p); err == nil {
-			sb.WriteString(fmt.Sprintf("### Project Dependencies (%s):\n```json\n", df))
+			fmt.Fprintf(&sb, "### Project Dependencies (%s):\n```json\n", df)
 			lines := strings.Split(string(data), "\n")
 			if len(lines) > 80 {
 				sb.WriteString(strings.Join(lines[:80], "\n"))
@@ -409,7 +409,7 @@ func extractSupplementaryContext(root string) string {
 					if !se.IsDir() && (strings.HasSuffix(se.Name(), ".sh") || strings.HasSuffix(se.Name(), ".py") || strings.HasSuffix(se.Name(), ".go")) {
 						scriptPath := filepath.Join(dirPath, se.Name())
 						if sData, err := os.ReadFile(scriptPath); err == nil {
-							sb.WriteString(fmt.Sprintf("### Sample Script (%s/%s):\n```bash\n", sd, se.Name()))
+							fmt.Fprintf(&sb, "### Sample Script (%s/%s):\n```bash\n", sd, se.Name())
 							lines := strings.Split(string(sData), "\n")
 							if len(lines) > 80 {
 								sb.WriteString(strings.Join(lines[:80], "\n"))

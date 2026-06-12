@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"agentskills/internal/config"
+	"github.com/ghchinoy/agentskills/internal/config"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -31,7 +31,7 @@ var showConfigCmd = &cobra.Command{
 
 		apiKey := viper.GetString("api_key")
 		if apiKey != "" {
-			masked := apiKey
+			var masked string
 			if len(apiKey) > 8 {
 				masked = apiKey[:4] + "..." + apiKey[len(apiKey)-4:]
 			} else {

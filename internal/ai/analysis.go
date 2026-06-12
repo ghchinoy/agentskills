@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"agentskills/internal/scanner"
+	"github.com/ghchinoy/agentskills/internal/scanner"
 
 	"google.golang.org/genai"
 )
@@ -20,10 +20,10 @@ func GenerateSkillsReport(ctx context.Context, client *genai.Client, files []sca
 	// 1. Construct the files payload for the prompt
 	var sb strings.Builder
 	for i, f := range files {
-		sb.WriteString(fmt.Sprintf("--- AGENT FILE %d ---\n", i+1))
-		sb.WriteString(fmt.Sprintf("Source: %s\n", f.Source))
-		sb.WriteString(fmt.Sprintf("Name: %s\n", f.Name))
-		sb.WriteString(fmt.Sprintf("Path/URL: %s\n", f.Path))
+		fmt.Fprintf(&sb, "--- AGENT FILE %d ---\n", i+1)
+		fmt.Fprintf(&sb, "Source: %s\n", f.Source)
+		fmt.Fprintf(&sb, "Name: %s\n", f.Name)
+		fmt.Fprintf(&sb, "Path/URL: %s\n", f.Path)
 		sb.WriteString("Content:\n")
 		sb.WriteString(f.Content)
 		sb.WriteString("\n\n")

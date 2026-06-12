@@ -1,4 +1,4 @@
-module agentskills
+module github.com/ghchinoy/agentskills
 
 go 1.26.4
 

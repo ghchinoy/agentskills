@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"agentskills/internal/config"
+	"github.com/ghchinoy/agentskills/internal/config"
 
 	"google.golang.org/genai"
 )
@@ -30,7 +30,7 @@ func NewClient(ctx context.Context, cfg *config.Config) (*genai.Client, error) {
 		}
 
 		if project == "" {
-			return nil, fmt.Errorf("Vertex AI requires a Google Cloud Project ID. Set it via:\n  agentskills config set project_id <your-project-id>\nor by exporting the GOOGLE_CLOUD_PROJECT environment variable")
+			return nil, fmt.Errorf("vertex AI requires a Google Cloud Project ID. Set it via:\n  agentskills config set project_id <your-project-id>\nor by exporting the GOOGLE_CLOUD_PROJECT environment variable")
 		}
 
 		location := cfg.Location
