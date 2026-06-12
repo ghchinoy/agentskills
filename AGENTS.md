@@ -148,3 +148,26 @@ For future agents maintaining or compiling `agentskills`:
 ### 3. Dolt Sync & Branch Hygiene
 * **Ignore Dolt Remote Branches:** You may see Pull Requests on GitHub for branches like `__dolt_remote_info__`. These are internal metadata branches used by Dolt's sync protocol. Do NOT attempt to merge or delete these branches; ignore them completely.
 
+### 4. Dolt & Beads Troubleshooting
+* **Dolt Schema Errors (`Error 1105 (HY000): table has unknown fields`):** This is caused by using an outdated local `dolt` binary (e.g. 1.x) to read a database written with a newer dolt (e.g. 2.x). Upgrade Dolt via Homebrew:
+  ```bash
+  HOMEBREW_NO_AUTO_UPDATE=1 brew install dolt
+  ```
+  Ensure that the active `dolt` binary is the one managed by Homebrew (version >= 2.x):
+  ```bash
+  dolt version
+  ```
+* **Beads Schema Incompatibilities (`column "depends_on_id" not found`):** If the `bd` binary fails to close tasks or query cycles due to schema mismatches, upgrade `bd` to the latest version:
+  ```bash
+  go install github.com/steveyegge/beads/cmd/bd@latest
+  ```
+  If compilation fails with `fatal error: 'unicode/regex.h' file not found`, it is missing ICU development headers. Compile by linking to Homebrew's ICU library path:
+  ```bash
+  CGO_CFLAGS="-I$(brew --prefix icu4c)/include" CGO_CXXFLAGS="-I$(brew --prefix icu4c)/include" CGO_LDFLAGS="-L$(brew --prefix icu4c)/lib" go install github.com/steveyegge/beads/cmd/bd@latest
+  ```
+* **Database Recovery:** If the database becomes corrupted or has conflicting fingerprints, run:
+  ```bash
+  bd doctor --fix --yes
+  ```
+
+
