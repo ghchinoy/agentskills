@@ -15,9 +15,23 @@ Before using `agentskills`, ensure your system meets the following requirements:
 
 ## 🛠️ Building & Installing
 
+### Global Installation (Recommended)
+
+To install the latest pre-compiled binary globally:
+```bash
+curl -fsSL https://raw.githubusercontent.com/ghchinoy/agentskills/main/install.sh | bash
+```
+
+Alternatively, if you have Go installed on your system, you can compile and install `agentskills` directly from source:
+```bash
+go install github.com/ghchinoy/agentskills@latest
+```
+
+### Build from Source
+
 We provide a standard `Makefile` to automate compilation:
 
-### Build the Binary
+#### Build the Binary
 This compiles the application and outputs the binary inside the `./bin/` directory:
 ```bash
 make build
