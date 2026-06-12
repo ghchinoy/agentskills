@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/ghchinoy/agentskills/internal/config"
+	"github.com/ghchinoy/agentskills/internal/ui"
 
 	"google.golang.org/genai"
 )
@@ -46,7 +47,7 @@ func NewClient(ctx context.Context, cfg *config.Config) (*genai.Client, error) {
 			Location: location,
 			Backend:  genai.BackendVertexAI,
 		}
-		fmt.Printf("Using Vertex AI Backend | Project: %s | Location: %s\n", project, location)
+		fmt.Printf("%s Using Vertex AI Backend | Project: %s | Location: %s\n", ui.Pass("✓"), ui.ID(project), ui.ID(location))
 
 	case "gemini":
 		// Direct Gemini API setup
@@ -68,7 +69,7 @@ func NewClient(ctx context.Context, cfg *config.Config) (*genai.Client, error) {
 			// Let the SDK pick up the API key from environment variables on its own
 			clientConfig = nil
 		}
-		fmt.Println("Using Direct Gemini API Backend")
+		fmt.Printf("%s Using Direct Gemini API Backend\n", ui.Pass("✓"))
 
 	default:
 		return nil, fmt.Errorf("invalid backend %q. Must be 'vertex' or 'gemini'", cfg.Backend)

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ghchinoy/agentskills/internal/config"
+	"github.com/ghchinoy/agentskills/internal/ui"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -12,22 +13,29 @@ import (
 
 // configCmd represents the config command
 var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Manage configuration settings for agentskills",
-	Long:  `View and modify configuration parameters like GCP project ID, region, backend type, and default GitHub user.`,
+	Use:     "config",
+	GroupID: "config",
+	Short:   "Manage configuration settings for agentskills",
+	Long:    `View and modify configuration parameters like GCP project ID, region, backend type, and default GitHub user.`,
+	Example: `  # Display current configuration
+  agentskills config show
+
+  # Set configuration project_id
+  agentskills config set project_id my-gcp-project`,
 }
 
 // showConfigCmd represents the config show subcommand
 var showConfigCmd = &cobra.Command{
-	Use:   "show",
-	Short: "Display the current configuration",
+	Use:     "show",
+	Short:   "Display the current configuration",
+	Example: `  agentskills config show`,
 	Run: func(cmd *cobra.Command, args []string) {
 		path, _ := config.GetConfigFilePath()
-		fmt.Printf("Configuration File: %s\n\n", path)
-		fmt.Printf("project_id:  %s\n", viper.GetString("project_id"))
-		fmt.Printf("location:    %s\n", viper.GetString("location"))
-		fmt.Printf("backend:     %s\n", viper.GetString("backend"))
-		fmt.Printf("github_user: %s\n", viper.GetString("github_user"))
+		fmt.Printf("Configuration File: %s\n\n", ui.ID(path))
+		printConfigVal("project_id", viper.GetString("project_id"))
+		printConfigVal("location", viper.GetString("location"))
+		printConfigVal("backend", viper.GetString("backend"))
+		printConfigVal("github_user", viper.GetString("github_user"))
 
 		apiKey := viper.GetString("api_key")
 		if apiKey != "" {
@@ -37,18 +45,23 @@ var showConfigCmd = &cobra.Command{
 			} else {
 				masked = "********"
 			}
-			fmt.Printf("api_key:     %s\n", masked)
+			fmt.Printf("%-12s %s\n", "api_key:", ui.ID(masked))
 		} else {
-			fmt.Printf("api_key:     (not set)\n")
+			fmt.Printf("%-12s %s\n", "api_key:", ui.Muted("(not set)"))
 		}
 	},
 }
 
 // setConfigCmd represents the config set subcommand
 var setConfigCmd = &cobra.Command{
-	Use:   "set [key] [value]",
-	Short: "Set a configuration parameter",
-	Args:  cobra.ExactArgs(2),
+	Use:     "set [key] [value]",
+	Short:   "Set a configuration parameter",
+	Args:    cobra.ExactArgs(2),
+	Example: `  # Set GCP project ID
+  agentskills config set project_id my-gcp-project-123
+
+  # Set generative AI backend
+  agentskills config set backend gemini`,
 	Long: `Set configuration keys. Valid keys are:
   - project_id:  Google Cloud Project ID
   - location:    GCP Region (e.g. us-central1)
@@ -65,7 +78,7 @@ var setConfigCmd = &cobra.Command{
 			if err := config.SaveConfig(); err != nil {
 				return fmt.Errorf("failed to save config: %w", err)
 			}
-			fmt.Printf("✓ Set configuration key %q to %q\n", key, val)
+			fmt.Printf("%s Set configuration key %q to %q\n", ui.Pass("✓"), ui.Accent(key), ui.ID(val))
 			return nil
 		default:
 			return fmt.Errorf("invalid config key %q. Valid keys are: project_id, location, backend, github_user, api_key", key)
@@ -77,4 +90,12 @@ func init() {
 	configCmd.AddCommand(showConfigCmd)
 	configCmd.AddCommand(setConfigCmd)
 	rootCmd.AddCommand(configCmd)
+}
+
+func printConfigVal(key, val string) {
+	if val == "" {
+		fmt.Printf("%-12s %s\n", key+":", ui.Muted("(not set)"))
+	} else {
+		fmt.Printf("%-12s %s\n", key+":", ui.ID(val))
+	}
 }

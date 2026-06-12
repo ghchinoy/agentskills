@@ -24,6 +24,11 @@ var rootCmd = &cobra.Command{
 	Long: `agentskills parses workspace-level agent rule files (GEMINI.md, CLAUDE.md, AGENTS.md, .cursorrules, etc.) from local directories or GitHub repositories,
 uses gemini-3.5-flash to analyze coding agent conventions, quality gates, and tech stacks,
 extracts core capabilities, and recommends how to consolidate them into cohesive skills.`,
+	Example: `  # Check current configuration
+  agentskills config show
+
+  # Recursively scan the current directory
+  agentskills scan --local .`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		cfg, err = config.InitConfig()
@@ -67,6 +72,16 @@ func Execute() {
 }
 
 func init() {
+	// Add command groups
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "config",
+		Title: "Configuration Commands:",
+	})
+	rootCmd.AddGroup(&cobra.Group{
+		ID:    "ops",
+		Title: "Operational Commands:",
+	})
+
 	// Persistent flags (available to all subcommands)
 	rootCmd.PersistentFlags().StringP("project", "p", "", "Google Cloud Project ID")
 	rootCmd.PersistentFlags().StringP("location", "l", "", "Google Cloud Location / Region (e.g. us-central1)")
