@@ -21,7 +21,16 @@ type AgentFile struct {
 	Content string `json:"content"` // Raw file contents
 }
 
-// LocalScanner recursively searches a local directory for GEMINI.md files.
+// AgentFilenames defines the list of standard workspace-level agent rule files.
+var AgentFilenames = []string{
+	"GEMINI.md",
+	"CLAUDE.md",
+	"AGENTS.md",
+	".cursorrules",
+	"SYSTEM_PROMPT.md",
+}
+
+// LocalScanner recursively searches a local directory for agent rule files.
 func LocalScanner(root string, deep bool) ([]AgentFile, error) {
 	var files []AgentFile
 
@@ -44,13 +53,27 @@ func LocalScanner(root string, deep bool) ([]AgentFile, error) {
 			return nil
 		}
 
-		if d.Name() == "GEMINI.md" {
+		var isAgentFile bool
+		for _, filename := range AgentFilenames {
+			if d.Name() == filename {
+				isAgentFile = true
+				break
+			}
+		}
+
+		// Also support newer Cursor rules (.mdc files under .cursor/rules/)
+		if !isAgentFile && strings.HasSuffix(d.Name(), ".mdc") && strings.Contains(filepath.ToSlash(path), ".cursor/rules") {
+			isAgentFile = true
+		}
+
+		if isAgentFile {
 			content, err := os.ReadFile(path)
 			if err != nil {
 				return fmt.Errorf("failed to read file %s: %w", path, err)
 			}
 
 			dirName := filepath.Base(filepath.Dir(path))
+			filename := d.Name()
 			fileContent := string(content)
 
 			if deep {
@@ -59,7 +82,7 @@ func LocalScanner(root string, deep bool) ([]AgentFile, error) {
 
 			files = append(files, AgentFile{
 				Source:  "local",
-				Name:    dirName,
+				Name:    fmt.Sprintf("%s (%s)", dirName, filename),
 				Path:    path,
 				Content: fileContent,
 			})
@@ -81,7 +104,7 @@ type GitHubRepo struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// GitHubScanner fetches GEMINI.md files from all active public repositories of a given user.
+// GitHubScanner fetches agent rule files from all active public repositories of a given user.
 func GitHubScanner(username string, forceRefresh bool, deep bool) ([]AgentFile, error) {
 	var files []AgentFile
 
@@ -105,41 +128,52 @@ func GitHubScanner(username string, forceRefresh bool, deep bool) ([]AgentFile, 
 
 	fmt.Printf("Discovered %d public repositories for user: %s\n", len(repos), username)
 
-	// 2. Fetch GEMINI.md for each repository (using cache where possible)
+	// 2. Fetch agent files for each repository (using cache where possible)
 	for _, repo := range repos {
-		cachePath := filepath.Join(userCacheDir, fmt.Sprintf("%s_GEMINI.md", repo.Name))
-		var hasGemini bool
-		var geminiContent string
-
-		// Check cache
-		if !forceRefresh {
-			if data, err := os.ReadFile(cachePath); err == nil {
-				hasGemini = true
-				geminiContent = string(data)
-			}
+		var foundFiles []struct {
+			filename string
+			content  string
 		}
 
-		if !hasGemini {
-			// Download from GitHub
-			fmt.Printf("Fetching GEMINI.md for %s/%s...\n", username, repo.Name)
-			content, found, err := downloadGEMINI(username, repo.Name)
-			if err != nil {
-				fmt.Printf("  ⚠ Error downloading for %s: %v\n", repo.Name, err)
-				continue
-			}
+		for _, filename := range AgentFilenames {
+			cachePath := filepath.Join(userCacheDir, fmt.Sprintf("%s_%s", repo.Name, filename))
+			var hasFile bool
+			var fileContent string
 
-			if found {
-				hasGemini = true
-				geminiContent = content
-				// Write to cache
-				if err := os.WriteFile(cachePath, []byte(content), 0644); err != nil {
-					fmt.Printf("  ⚠ Warning: failed to cache GEMINI.md for %s: %v\n", repo.Name, err)
+			// Check cache
+			if !forceRefresh {
+				if data, err := os.ReadFile(cachePath); err == nil {
+					hasFile = true
+					fileContent = string(data)
 				}
 			}
+
+			if !hasFile {
+				// Download from GitHub
+				content, found, err := downloadAgentFile(username, repo.Name, filename)
+				if err != nil {
+					continue
+				}
+
+				if found {
+					hasFile = true
+					fileContent = content
+					// Write to cache
+					_ = os.WriteFile(cachePath, []byte(content), 0644)
+				}
+			}
+
+			if hasFile {
+				foundFiles = append(foundFiles, struct {
+					filename string
+					content  string
+				}{filename: filename, content: fileContent})
+			}
 		}
 
-		if hasGemini {
-			// If deep is true, we clone the repository and extract metadata
+		if len(foundFiles) > 0 {
+			var supplementaryContext string
+			// If deep is true, we clone the repository exactly once to extract metadata
 			if deep {
 				fmt.Printf("Performing deep checkout for %s/%s...\n", username, repo.Name)
 				tempDir, err := os.MkdirTemp("", fmt.Sprintf("agentskills-clone-%s-*", repo.Name))
@@ -147,8 +181,7 @@ func GitHubScanner(username string, forceRefresh bool, deep bool) ([]AgentFile, 
 					cloneURL := fmt.Sprintf("https://github.com/%s/%s.git", username, repo.Name)
 					cmd := exec.Command("git", "clone", "--depth", "1", cloneURL, tempDir)
 					if err := cmd.Run(); err == nil {
-						// Extract supplementary context from the cloned directory
-						geminiContent += extractSupplementaryContext(tempDir)
+						supplementaryContext = extractSupplementaryContext(tempDir)
 					} else {
 						fmt.Printf("  ⚠ Warning: failed to clone repository %s: %v\n", repo.Name, err)
 					}
@@ -159,12 +192,14 @@ func GitHubScanner(username string, forceRefresh bool, deep bool) ([]AgentFile, 
 				}
 			}
 
-			files = append(files, AgentFile{
-				Source:  "github",
-				Name:    repo.Name,
-				Path:    fmt.Sprintf("https://github.com/%s/%s/blob/main/GEMINI.md", username, repo.Name),
-				Content: geminiContent,
-			})
+			for _, f := range foundFiles {
+				files = append(files, AgentFile{
+					Source:  "github",
+					Name:    fmt.Sprintf("%s (%s)", repo.Name, f.filename),
+					Path:    fmt.Sprintf("https://github.com/%s/%s/blob/main/%s", username, repo.Name, f.filename),
+					Content: f.content + supplementaryContext,
+				})
+			}
 		}
 	}
 
@@ -213,11 +248,11 @@ func fetchGitHubRepos(username string) ([]GitHubRepo, error) {
 	return allRepos, nil
 }
 
-func downloadGEMINI(username, repo string) (string, bool, error) {
+func downloadAgentFile(username, repo, filename string) (string, bool, error) {
 	branches := []string{"main", "master"}
 
 	for _, branch := range branches {
-		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/GEMINI.md", username, repo, branch)
+		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", username, repo, branch, filename)
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
 			return "", false, err
@@ -258,11 +293,25 @@ func loadFromCache(userCacheDir string) ([]AgentFile, error) {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_GEMINI.md") {
+		if entry.IsDir() {
 			continue
 		}
 
-		repoName := strings.TrimSuffix(entry.Name(), "_GEMINI.md")
+		var matchedFilename string
+		for _, filename := range AgentFilenames {
+			suffix := "_" + filename
+			if strings.HasSuffix(entry.Name(), suffix) {
+				matchedFilename = filename
+				break
+			}
+		}
+
+		if matchedFilename == "" {
+			continue
+		}
+
+		suffix := "_" + matchedFilename
+		repoName := strings.TrimSuffix(entry.Name(), suffix)
 		path := filepath.Join(userCacheDir, entry.Name())
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -271,7 +320,7 @@ func loadFromCache(userCacheDir string) ([]AgentFile, error) {
 
 		files = append(files, AgentFile{
 			Source:  "github",
-			Name:    repoName,
+			Name:    fmt.Sprintf("%s (%s)", repoName, matchedFilename),
 			Path:    path,
 			Content: string(data),
 		})

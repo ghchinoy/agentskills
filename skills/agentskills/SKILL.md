@@ -20,6 +20,15 @@ AI agents should invoke this skill when:
 
 ---
 
+## 📋 Supported Agent & Workspace Rule Files
+The CLI tool dynamically walks local directories or crawls GitHub repositories to locate and aggregate workspace rule formats for different agent models:
+*   **Gemini**: `GEMINI.md`
+*   **Claude**: `CLAUDE.md`
+*   **OpenCode / Beads**: `AGENTS.md`
+*   **Codex / Cursor**: `.cursorrules`, individual rules inside `.cursor/rules/*.mdc`, and `SYSTEM_PROMPT.md`
+
+---
+
 ## 🛠️ Execution & Commands
 
 ### 0. Download & Installation (If CLI is Missing)

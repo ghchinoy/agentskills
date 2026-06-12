@@ -47,7 +47,7 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 				return fmt.Errorf("local scan failed: %w", err)
 			}
 			allFiles = append(allFiles, localFiles...)
-			fmt.Printf("✓ Local scan finished. Found %d GEMINI.md files.\n\n", len(localFiles))
+			fmt.Printf("✓ Local scan finished. Found %d agent rule files.\n\n", len(localFiles))
 		}
 
 		if githubScan != "" {
@@ -57,7 +57,7 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 				return fmt.Errorf("GitHub scan failed: %w", err)
 			}
 			allFiles = append(allFiles, githubFiles...)
-			fmt.Printf("✓ GitHub scan finished. Loaded %d GEMINI.md files.\n\n", len(githubFiles))
+			fmt.Printf("✓ GitHub scan finished. Loaded %d agent rule files.\n\n", len(githubFiles))
 		}
 
 		fmt.Println("=== Discovery Summary ===")
@@ -68,7 +68,7 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 		fmt.Println("=========================")
 
 		if len(allFiles) == 0 {
-			fmt.Println("No GEMINI.md files found to analyze.")
+			fmt.Println("No agent rule files found to analyze.")
 			return nil
 		}
 

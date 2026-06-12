@@ -1,16 +1,35 @@
 # agentskills
 
-agentskills scans, parses, and analyzes AI agent rule files (`GEMINI.md`) across local directories or GitHub repositories. It uses `gemini-3.5-flash` via Google Cloud Vertex AI or the Gemini API to find rule duplication (such as task tracking or session-ending workflows) and recommend consolidated agent skills.
+`agentskills` scans, parses, and analyzes AI agent rule and workspace instruction files across local directories or GitHub repositories. It uses `gemini-3.5-flash` via Google Cloud Vertex AI or the Gemini API to find rule duplication (such as task tracking or session-ending workflows) and recommend consolidated agent skills.
+
+## Supported Agent & Workspace Rule Formats
+
+To accommodate diverse developer and agent orchestration standards, the CLI dynamically discovers and parses files for:
+*   **Gemini**: `GEMINI.md`
+*   **Claude**: `CLAUDE.md`
+*   **OpenCode / Beads**: `AGENTS.md`
+*   **Codex / Cursor**: `.cursorrules`, `.cursor/rules/*.mdc` (newer individual rule configurations), and `SYSTEM_PROMPT.md`
 
 ## Features
 
-* **Scanning Modes**: Scan local directories recursively or crawl public repositories of a GitHub user to locate `GEMINI.md` files.
+* **Scanning Modes**: Scan local directories recursively or crawl public repositories of a GitHub user to locate agent rule files.
+* **Deep Codebase Scan (`--deep`)**: Shallow-clones remote repos or scans local folders to extract build settings (`Makefile`), dependencies (`go.mod`, `package.json`, `Cargo.toml`), and sample scripts to enrich analysis.
 * **XDG Cache Support**: Caches fetched files under `~/.cache/agentskills/` to reduce API requests and support offline analysis.
 * **SDK Integration**: Uses the official `google.golang.org/genai` Go SDK to run analysis via Vertex AI or the Gemini API.
 * **Configuration Management**: Uses Cobra and Viper to manage settings in `~/.config/agentskills/config.yaml`.
-* **Report Generation**: Produces a markdown report detailing technologies, task tracking overlaps, and recommended agent skills.
+* **Report Generation**: Produces a detailed markdown report detailing technologies, task tracking overlaps, and recommended agent skills.
 
 ## Installation
+
+### Direct Download & Global Install (Recommended)
+
+To install the latest pre-compiled binary globally:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ghchinoy/agentskills/main/install.sh | bash
+```
+
+### Build from Source
 
 Compile the binary using the provided `Makefile`:
 
@@ -54,12 +73,20 @@ If you prefer to use the direct Gemini API:
 
 ## Usage
 
-### Scan a GitHub Profile
+### Scan a GitHub Profile (Standard Mode)
 
-Scan all public repositories of a GitHub user:
+Scan all public repositories of a GitHub user for standard rule files:
 
 ```bash
 ./bin/agentskills scan --github <username> -o ./skills_report.md
+```
+
+### Scan with Deep Codebase Analysis (`--deep`)
+
+Performs deep analysis on repositories by cloning/scanning project dependency manifests and sample files:
+
+```bash
+./bin/agentskills scan --github <username> --deep -o ./skills_report.md
 ```
 
 ### Scan a Local Directory
