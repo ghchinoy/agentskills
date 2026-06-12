@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +21,24 @@ var (
 	outputFile   string
 	forceRefresh bool
 	deepScan     bool
+	jsonOutput   bool
 )
+
+type ScanResult struct {
+	Files            []FileEntry `json:"files"`
+	TotalInputTokens int         `json:"total_input_tokens"`
+	ReportTokens     int         `json:"report_tokens"`
+	ReductionPercent float64     `json:"reduction_percentage"`
+	Report           string      `json:"report"`
+	OutputFile       string      `json:"output_file"`
+}
+
+type FileEntry struct {
+	Source string `json:"source"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Tokens int    `json:"tokens"`
+}
 
 // scanCmd represents the scan command
 var scanCmd = &cobra.Command{
@@ -49,37 +67,51 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 
 		var allFiles []scanner.AgentFile
 
-		fmt.Println(ui.Accent("=== Starting Agent Skills Scan ==="))
+		if !jsonOutput {
+			fmt.Println(ui.Accent("=== Starting Agent Skills Scan ==="))
+		}
 
 		if localScan != "" {
-			fmt.Printf("Scanning local path: %s...\n", ui.ID(localScan))
+			if !jsonOutput {
+				fmt.Printf("Scanning local path: %s...\n", ui.ID(localScan))
+			}
 			localFiles, err := scanner.LocalScanner(localScan, deepScan)
 			if err != nil {
 				return fmt.Errorf("local scan failed: %w", err)
 			}
 			allFiles = append(allFiles, localFiles...)
-			fmt.Printf("%s Local scan finished. Found %d agent rule files.\n\n", ui.Pass("✓"), len(localFiles))
+			if !jsonOutput {
+				fmt.Printf("%s Local scan finished. Found %d agent rule files.\n\n", ui.Pass("✓"), len(localFiles))
+			}
 		}
 
 		if githubScan != "" {
-			fmt.Printf("Scanning GitHub profile: %s...\n", ui.ID(githubScan))
+			if !jsonOutput {
+				fmt.Printf("Scanning GitHub profile: %s...\n", ui.ID(githubScan))
+			}
 			githubFiles, err := scanner.GitHubScanner(githubScan, forceRefresh, deepScan)
 			if err != nil {
 				return fmt.Errorf("GitHub scan failed: %w", err)
 			}
 			allFiles = append(allFiles, githubFiles...)
-			fmt.Printf("%s GitHub scan finished. Loaded %d agent rule files.\n\n", ui.Pass("✓"), len(githubFiles))
+			if !jsonOutput {
+				fmt.Printf("%s GitHub scan finished. Loaded %d agent rule files.\n\n", ui.Pass("✓"), len(githubFiles))
+			}
 		}
 
-		fmt.Println(ui.Accent("=== Discovery Summary ==="))
-		fmt.Printf("Total files loaded: %d\n", len(allFiles))
-		for _, f := range allFiles {
-			fmt.Printf("  - [%s] %s\n", ui.Muted(f.Source), ui.ID(f.Name))
+		if !jsonOutput {
+			fmt.Println(ui.Accent("=== Discovery Summary ==="))
+			fmt.Printf("Total files loaded: %d\n", len(allFiles))
+			for _, f := range allFiles {
+				fmt.Printf("  - [%s] %s\n", ui.Muted(f.Source), ui.ID(f.Name))
+			}
+			fmt.Println(ui.Accent("========================="))
 		}
-		fmt.Println(ui.Accent("========================="))
 
 		if len(allFiles) == 0 {
-			fmt.Println("No agent rule files found to analyze.")
+			if !jsonOutput {
+				fmt.Println("No agent rule files found to analyze.")
+			}
 			return nil
 		}
 
@@ -91,21 +123,38 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 		}
 
 		// Calculate input token statistics
-		fmt.Println(ui.Accent("\n=== Token & Context Statistics ==="))
+		if !jsonOutput {
+			fmt.Println(ui.Accent("\n=== Token & Context Statistics ==="))
+		}
+		var fileEntries []FileEntry
 		var totalInputTokens int
 		for _, f := range allFiles {
 			tokens, err := ai.CountTokens(ctx, client, f.Content)
 			if err != nil {
-				fmt.Printf("  - [%s] %s: (unable to count tokens: %v)\n", ui.Muted(f.Source), ui.ID(f.Name), err)
+				if !jsonOutput {
+					fmt.Printf("  - [%s] %s: (unable to count tokens: %v)\n", ui.Muted(f.Source), ui.ID(f.Name), err)
+				}
 				continue
 			}
-			fmt.Printf("  - [%s] %s: %d %s\n", ui.Muted(f.Source), ui.ID(f.Name), tokens, ui.Muted("tokens"))
+			if !jsonOutput {
+				fmt.Printf("  - [%s] %s: %d %s\n", ui.Muted(f.Source), ui.ID(f.Name), tokens, ui.Muted("tokens"))
+			}
 			totalInputTokens += tokens
+			fileEntries = append(fileEntries, FileEntry{
+				Source: f.Source,
+				Name:   f.Name,
+				Path:   f.Path,
+				Tokens: tokens,
+			})
 		}
-		fmt.Printf("Total input context footprint: %d %s\n", totalInputTokens, ui.Muted("tokens"))
+		if !jsonOutput {
+			fmt.Printf("Total input context footprint: %d %s\n", totalInputTokens, ui.Muted("tokens"))
+		}
 
 		// 4. Generate the Consolidation Report
-		fmt.Printf("\nAnalysing files with %s...\n", ui.Command("gemini-3.5-flash"))
+		if !jsonOutput {
+			fmt.Printf("\nAnalysing files with %s...\n", ui.Command("gemini-3.5-flash"))
+		}
 		report, err := ai.GenerateSkillsReport(ctx, client, allFiles)
 		if err != nil {
 			return fmt.Errorf("analysis report generation failed: %w", err)
@@ -124,16 +173,38 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 
 		// Calculate generated report token count
 		reportTokens, err := ai.CountTokens(ctx, client, report)
+		var reduction float64
 		if err == nil {
-			fmt.Printf("Consolidated report size: %d %s\n", reportTokens, ui.Muted("tokens"))
 			if totalInputTokens > 0 {
-				reduction := float64(totalInputTokens-reportTokens) / float64(totalInputTokens) * 100
-				fmt.Printf("Instruction context footprint change: %.1f%%\n", reduction)
+				reduction = float64(totalInputTokens-reportTokens) / float64(totalInputTokens) * 100
+			}
+			if !jsonOutput {
+				fmt.Printf("Consolidated report size: %d %s\n", reportTokens, ui.Muted("tokens"))
+				if totalInputTokens > 0 {
+					fmt.Printf("Instruction context footprint change: %.1f%%\n", reduction)
+				}
 			}
 		}
 
-		fmt.Printf("\n%s\n", ui.Pass("✓ Success! Consolidation report generated successfully."))
-		fmt.Printf("Saved to: %s\n", ui.ID(outputFile))
+		if !jsonOutput {
+			fmt.Printf("\n%s\n", ui.Pass("✓ Success! Consolidation report generated successfully."))
+			fmt.Printf("Saved to: %s\n", ui.ID(outputFile))
+		} else {
+			// Print structured JSON to stdout
+			result := ScanResult{
+				Files:            fileEntries,
+				TotalInputTokens:  totalInputTokens,
+				ReportTokens:      reportTokens,
+				ReductionPercent:  reduction,
+				Report:            report,
+				OutputFile:        outputFile,
+			}
+			data, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON output: %w", err)
+			}
+			fmt.Println(string(data))
+		}
 
 		return nil
 	},
@@ -145,6 +216,7 @@ func init() {
 	scanCmd.Flags().StringVarP(&outputFile, "output", "o", "./skills_report.md", "Target path for the generated markdown report")
 	scanCmd.Flags().BoolVarP(&forceRefresh, "force-refresh", "f", false, "Force refresh GitHub CDN downloads (bypass local XDG cache)")
 	scanCmd.Flags().BoolVarP(&deepScan, "deep", "d", false, "Perform deep repository/codebase scanning to extract dependencies, build structures, and script details")
+	scanCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results in JSON format to stdout")
 
 	rootCmd.AddCommand(scanCmd)
 }

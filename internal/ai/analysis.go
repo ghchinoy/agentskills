@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/ghchinoy/agentskills/internal/scanner"
@@ -75,7 +76,7 @@ Your report must contain the following sections formatted in beautiful, high-qua
 `, filesPayload)
 
 	// 3. Invoke gemini-3.5-flash
-	fmt.Println("Sending aggregate data to gemini-3.5-flash for consolidation analysis...")
+	fmt.Fprintln(os.Stderr, "Sending aggregate data to gemini-3.5-flash for consolidation analysis...")
 	resp, err := client.Models.GenerateContent(ctx, ModelName, genai.Text(prompt), nil)
 	if err != nil {
 		return "", fmt.Errorf("gemini-3.5-flash generation failed: %w", err)
