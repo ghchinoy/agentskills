@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ghchinoy/agentskills/internal/ai"
+	"github.com/ghchinoy/agentskills/internal/catalog"
 	"github.com/ghchinoy/agentskills/internal/scanner"
 	"github.com/ghchinoy/agentskills/internal/ui"
 
@@ -157,16 +159,27 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 			fmt.Printf("Total input context footprint: %d %s\n", totalInputTokens, ui.Muted("tokens"))
 		}
 
-		// 4. Generate the Consolidation Report
-		var report string
-		if jsonOutput {
-			report, err = ai.GenerateSkillsReportJSON(ctx, client, allFiles)
-		} else {
-			fmt.Printf("\nAnalysing files with %s...\n", ui.Command("gemini-3.5-flash"))
-			report, err = ai.GenerateSkillsReport(ctx, client, allFiles)
-		}
+		// 4. Generate the structured JSON report (always) to update the catalog database
+		jsonReport, err := ai.GenerateSkillsReportJSON(ctx, client, allFiles)
 		if err != nil {
-			return fmt.Errorf("analysis report generation failed: %w", err)
+			return fmt.Errorf("structured analysis failed: %w", err)
+		}
+
+		// Parse the JSON report
+		cleanReport := cleanJSON(jsonReport)
+		var analysis map[string]interface{}
+		if err := json.Unmarshal([]byte(cleanReport), &analysis); err != nil {
+			return fmt.Errorf("failed to parse structured analysis report: %w. Raw output: %s", err, jsonReport)
+		}
+
+		// If human-readable report is requested, also generate the rich markdown report
+		var reportMarkdown string
+		if !jsonOutput {
+			fmt.Printf("\nAnalysing files with %s...\n", ui.Command("gemini-3.5-flash"))
+			reportMarkdown, err = ai.GenerateSkillsReport(ctx, client, allFiles)
+			if err != nil {
+				return fmt.Errorf("markdown report generation failed: %w", err)
+			}
 		}
 
 		// 5. Ensure parent directory of output file exists
@@ -176,12 +189,24 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 		}
 
 		// 6. Write report to output file
-		if err := os.WriteFile(outputFile, []byte(report), 0644); err != nil {
-			return fmt.Errorf("failed to write consolidation report to %q: %w", outputFile, err)
+		if !jsonOutput {
+			if err := os.WriteFile(outputFile, []byte(reportMarkdown), 0644); err != nil {
+				return fmt.Errorf("failed to write consolidation report to %q: %w", outputFile, err)
+			}
+		} else {
+			if err := os.WriteFile(outputFile, []byte(jsonReport), 0644); err != nil {
+				return fmt.Errorf("failed to write consolidation report to %q: %w", outputFile, err)
+			}
 		}
 
 		// Calculate generated report token count
-		reportTokens, err := ai.CountTokens(ctx, client, report)
+		var reportTokens int
+		if !jsonOutput {
+			reportTokens, err = ai.CountTokens(ctx, client, reportMarkdown)
+		} else {
+			reportTokens, err = ai.CountTokens(ctx, client, jsonReport)
+		}
+
 		var reduction float64
 		if err == nil {
 			if totalInputTokens > 0 {
@@ -195,23 +220,58 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 			}
 		}
 
+		// 7. Update local discovered skills catalog
+		cat, err := catalog.LoadCatalog()
+		if err == nil && cat != nil {
+			if skillsInterface, ok := analysis["skills"]; ok {
+				if skillsSlice, ok := skillsInterface.([]interface{}); ok {
+					for _, item := range skillsSlice {
+						if skillMap, ok := item.(map[string]interface{}); ok {
+							name, _ := skillMap["name"].(string)
+							desc, _ := skillMap["description"].(string)
+							var caps []string
+							if capsInterface, ok := skillMap["capabilities"]; ok {
+								if capsSlice, ok := capsInterface.([]interface{}); ok {
+									for _, capVal := range capsSlice {
+										if str, ok := capVal.(string); ok {
+											caps = append(caps, str)
+										}
+									}
+								}
+							}
+
+							for _, f := range allFiles {
+								cat.AddOrUpdateSkill(name, desc, caps, catalog.SourceMetadata{
+									Type: f.Source,
+									Name: f.Name,
+									Path: f.Path,
+								})
+							}
+						}
+					}
+				}
+			}
+
+			for _, f := range allFiles {
+				cat.TrackRepository(f.Source, f.Name, f.Path)
+			}
+
+			if err := catalog.SaveCatalog(cat); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to save skills catalog: %v\n", err)
+			}
+		}
+
 		if !jsonOutput {
 			fmt.Printf("\n%s\n", ui.Pass("✓ Success! Consolidation report generated successfully."))
 			fmt.Printf("Saved to: %s\n", ui.ID(outputFile))
 		} else {
 			// Print structured JSON to stdout
-			var parsedReport interface{}
-			if err := json.Unmarshal([]byte(report), &parsedReport); err != nil {
-				// Fallback to raw string if unmarshaling fails
-				parsedReport = report
-			}
-
 			result := ScanResult{
 				Files:            fileEntries,
 				TotalInputTokens:  totalInputTokens,
 				ReportTokens:      reportTokens,
 				ReductionPercent:  reduction,
-				Report:            parsedReport,
+				Report:            analysis,
 				OutputFile:        outputFile,
 			}
 			data, err := json.MarshalIndent(result, "", "  ")
@@ -235,4 +295,19 @@ func init() {
 	scanCmd.Flags().BoolVar(&forceScan, "force-scan", false, "Bypass scale safety gate (allow scanning more than 10 files)")
 
 	rootCmd.AddCommand(scanCmd)
+}
+
+func cleanJSON(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		idx := strings.Index(s, "\n")
+		if idx >= 0 {
+			s = s[idx+1:]
+		}
+		if strings.HasSuffix(s, "```") {
+			s = s[:len(s)-3]
+		}
+		s = strings.TrimSpace(s)
+	}
+	return s
 }
