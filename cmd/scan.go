@@ -30,7 +30,7 @@ type ScanResult struct {
 	TotalInputTokens int         `json:"total_input_tokens"`
 	ReportTokens     int         `json:"report_tokens"`
 	ReductionPercent float64     `json:"reduction_percentage"`
-	Report           string      `json:"report"`
+	Report           interface{} `json:"report"`
 	OutputFile       string      `json:"output_file"`
 }
 
@@ -158,10 +158,13 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 		}
 
 		// 4. Generate the Consolidation Report
-		if !jsonOutput {
+		var report string
+		if jsonOutput {
+			report, err = ai.GenerateSkillsReportJSON(ctx, client, allFiles)
+		} else {
 			fmt.Printf("\nAnalysing files with %s...\n", ui.Command("gemini-3.5-flash"))
+			report, err = ai.GenerateSkillsReport(ctx, client, allFiles)
 		}
-		report, err := ai.GenerateSkillsReport(ctx, client, allFiles)
 		if err != nil {
 			return fmt.Errorf("analysis report generation failed: %w", err)
 		}
@@ -197,12 +200,18 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 			fmt.Printf("Saved to: %s\n", ui.ID(outputFile))
 		} else {
 			// Print structured JSON to stdout
+			var parsedReport interface{}
+			if err := json.Unmarshal([]byte(report), &parsedReport); err != nil {
+				// Fallback to raw string if unmarshaling fails
+				parsedReport = report
+			}
+
 			result := ScanResult{
 				Files:            fileEntries,
 				TotalInputTokens:  totalInputTokens,
 				ReportTokens:      reportTokens,
 				ReductionPercent:  reduction,
-				Report:            report,
+				Report:            parsedReport,
 				OutputFile:        outputFile,
 			}
 			data, err := json.MarshalIndent(result, "", "  ")

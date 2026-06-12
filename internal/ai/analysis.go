@@ -90,6 +90,61 @@ Your report must contain the following sections formatted in beautiful, high-qua
 	return reportText, nil
 }
 
+// GenerateSkillsReportJSON aggregates all discovered agent files, prompts gemini-3.5-flash to analyze them,
+// and returns the structured JSON report string.
+func GenerateSkillsReportJSON(ctx context.Context, client *genai.Client, files []scanner.AgentFile) (string, error) {
+	var sb strings.Builder
+	for _, f := range files {
+		fmt.Fprintf(&sb, "--- FILE: %s (%s) ---\n%s\n\n", f.Name, f.Source, f.Content)
+	}
+	filesPayload := sb.String()
+
+	prompt := `You are Antigravity, a Principal Developer Experience (DX) and Agent Experience (AX) engineer.
+Your task is to analyze the following aggregated agent rule and instruction files collected from a workspace or GitHub repositories.
+Analyze them to identify tech stack elements, linting rules, custom tool configurations, safety gates, and any duplicate or overlapping instructions across different files.
+
+You MUST return a JSON object with the following schema:
+{
+  "summary": {
+    "key_findings": ["string"],
+    "tech_stack": ["string"]
+  },
+  "skills": [
+    {
+      "name": "string",
+      "description": "string",
+      "capabilities": ["string"]
+    }
+  ],
+  "duplications": [
+    {
+      "description": "string",
+      "files_affected": ["string"]
+    }
+  ]
+}
+
+Return only the raw JSON string matching this schema. Do not wrap the JSON in markdown code blocks.
+
+Input files:
+` + filesPayload
+
+	fmt.Fprintln(os.Stderr, "Sending aggregate data to gemini-3.5-flash for structured JSON analysis...")
+	resp, err := client.Models.GenerateContent(ctx, ModelName, genai.Text(prompt), &genai.GenerateContentConfig{
+		ResponseMIMEType: "application/json",
+	})
+	if err != nil {
+		return "", fmt.Errorf("gemini-3.5-flash structured analysis failed: %w", err)
+	}
+
+	reportText := resp.Text()
+	if reportText == "" {
+		return "", fmt.Errorf("gemini-3.5-flash returned an empty report")
+	}
+
+	return reportText, nil
+}
+
 // CountTokens counts the number of tokens in the given text using gemini-3.5-flash.
 func CountTokens(ctx context.Context, client *genai.Client, text string) (int, error) {
 	contents := []*genai.Content{
