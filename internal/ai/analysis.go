@@ -68,6 +68,13 @@ Your report must contain the following sections formatted in beautiful, high-qua
       - Ensure standard updates apply universally.
       - Make agent onboardings faster and more consistent.
     - Detail the exact modular skill files or MCP tools you recommend creating, and how they would be mapped to each project.
+6.  # Agent Skills Specification Alignment
+    - In accordance with the Agent Skills Specification (https://agentskills.io/specification.md), evaluate if any of the resolved files are too large or cognitively dense (progressive disclosure rules recommend keeping instructions/SKILL.md under 5,000 tokens / 500 lines).
+    - If a file exceeds these thresholds or contains large inline code blocks, complex configurations, or long API references, recommend specific directory splits:
+      - **scripts/**: Extract executable snippets or automation scripts.
+      - **references/**: Move detailed technical specifications, APIs, or secondary docs.
+      - **assets/**: Move configuration profiles, data tables, or templates.
+    - Provide exact step-by-step actions to clean up these files.
 
 ### Formatting Guidelines:
 - Use rich markdown styling (clean headers, bulleted lists, bold accents, blockquotes, and tables).
@@ -102,6 +109,7 @@ func GenerateSkillsReportJSON(ctx context.Context, client *genai.Client, files [
 	prompt := `You are Antigravity, a Principal Developer Experience (DX) and Agent Experience (AX) engineer.
 Your task is to analyze the following aggregated agent rule and instruction files collected from a workspace or GitHub repositories.
 Analyze them to identify tech stack elements, linting rules, custom tool configurations, safety gates, and any duplicate or overlapping instructions across different files.
+Evaluate if files are too long (violating the progressive disclosure guidelines of the Agent Skills Specification at https://agentskills.io/specification.md) or contain detailed templates or code snippets that should be split out.
 
 You MUST return a JSON object with the following schema:
 {
@@ -120,6 +128,14 @@ You MUST return a JSON object with the following schema:
     {
       "description": "string",
       "files_affected": ["string"]
+    }
+  ],
+  "structure_recommendations": [
+    {
+      "file": "string",
+      "target_directory": "scripts|references|assets",
+      "recommendation": "string",
+      "rationale": "string"
     }
   ]
 }

@@ -14,7 +14,7 @@ var (
 	cfg *config.Config
 )
 
-var Version = "1.2.1"
+var Version = "1.3.0"
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
