@@ -22,6 +22,7 @@ var (
 	forceRefresh bool
 	deepScan     bool
 	jsonOutput   bool
+	forceScan    bool
 )
 
 type ScanResult struct {
@@ -113,6 +114,11 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 				fmt.Println("No agent rule files found to analyze.")
 			}
 			return nil
+		}
+
+		// Scale safety gate
+		if len(allFiles) > 10 && !forceScan {
+			return fmt.Errorf("scan found %d agent rule files. To prevent API rate limits and context window bloat, the scale safety gate limits single scans to 10 files. Please narrow your search path or use the --force-scan flag to bypass this limit", len(allFiles))
 		}
 
 		// 3. Initialize official GenAI client
@@ -217,6 +223,7 @@ func init() {
 	scanCmd.Flags().BoolVarP(&forceRefresh, "force-refresh", "f", false, "Force refresh GitHub CDN downloads (bypass local XDG cache)")
 	scanCmd.Flags().BoolVarP(&deepScan, "deep", "d", false, "Perform deep repository/codebase scanning to extract dependencies, build structures, and script details")
 	scanCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output results in JSON format to stdout")
+	scanCmd.Flags().BoolVar(&forceScan, "force-scan", false, "Bypass scale safety gate (allow scanning more than 10 files)")
 
 	rootCmd.AddCommand(scanCmd)
 }
