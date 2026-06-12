@@ -173,4 +173,7 @@ For future agents maintaining or compiling `agentskills`:
   bd doctor --fix --yes
   ```
 
+### 5. LLM JSON Integration Guardrails
+* **Defensive JSON Cleaning:** When parsing JSON responses returned by an LLM (using `json.Unmarshal`), always pass the raw response through a helper function (like `cleanJSON` in `cmd/scan.go`) that strips Markdown code block wrappers (e.g., ` ```json ` and ` ``` `) and trims leading/trailing whitespace. This prevents parsing failures from unexpected model output formatting.
+
 
