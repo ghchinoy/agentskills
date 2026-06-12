@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/ghchinoy/agentskills/internal/ai"
 	"github.com/ghchinoy/agentskills/internal/scanner"
@@ -100,7 +101,13 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 			return fmt.Errorf("analysis report generation failed: %w", err)
 		}
 
-		// 5. Write report to output file
+		// 5. Ensure parent directory of output file exists
+		outputDir := filepath.Dir(outputFile)
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %q for output file: %w", outputDir, err)
+		}
+
+		// 6. Write report to output file
 		if err := os.WriteFile(outputFile, []byte(report), 0644); err != nil {
 			return fmt.Errorf("failed to write consolidation report to %q: %w", outputFile, err)
 		}
