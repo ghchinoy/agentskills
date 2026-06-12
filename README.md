@@ -29,6 +29,14 @@ To install the latest pre-compiled binary globally:
 curl -fsSL https://raw.githubusercontent.com/ghchinoy/agentskills/main/install.sh | bash
 ```
 
+### Via Go Install
+
+If you have Go installed on your system, you can compile and install `agentskills` directly from source:
+
+```bash
+go install github.com/ghchinoy/agentskills@latest
+```
+
 ### Build from Source
 
 Compile the binary using the provided `Makefile`:

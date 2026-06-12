@@ -14,7 +14,11 @@ We conform to **Semantic Versioning 2.0.0** (`vMAJOR.MINOR.PATCH`):
 
 ## ⚙️ Prerequisites for Releases
 To compile and publish a production release, the release engineer must have:
-1.  **GoReleaser installed:** Installation on Debian/Ubuntu:
+1.  **GoReleaser installed:** Installation via Go:
+    ```bash
+    go install github.com/goreleaser/goreleaser/v2@latest
+    ```
+    Or on Debian/Ubuntu:
     ```bash
     sudo apt-get install goreleaser
     ```

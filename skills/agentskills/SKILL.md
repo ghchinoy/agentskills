@@ -38,6 +38,11 @@ curl -fsSL https://raw.githubusercontent.com/ghchinoy/agentskills/main/install.s
 ```
 This script resolves the latest GitHub release, downloads and extracts the appropriate binary for your system architecture, installs it to `/usr/local/bin` (falling back to `~/.local/bin`), and registers the global agent skills to `~/.config/agentskills/skills/`.
 
+Alternatively, if you have Go installed on your system, you can compile and install `agentskills` directly from source:
+```bash
+go install github.com/ghchinoy/agentskills@latest
+```
+
 ### 1. Locate the Binary
 *   When working directly in the development repository, compile the latest state using `make build` and invoke the compiled binary using its local path: `./bin/agentskills`.
 *   If installed globally via the script, invoke it directly as `agentskills`.
