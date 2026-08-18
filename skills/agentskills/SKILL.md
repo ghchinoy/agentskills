@@ -1,6 +1,6 @@
 ---
 name: agentskills
-description: Utilizes the agentskills CLI tool to recursively scan local directories or public GitHub profiles for workspace rule conventions (GEMINI.md), parsing them with gemini-3.5-flash to aggregate capabilities and identify duplication.
+description: Utilizes the agentskills CLI tool to recursively scan local directories or public GitHub profiles for workspace rule conventions (GEMINI.md), parsing them with gemini-3.7-flash to aggregate capabilities and identify duplication.
 license: Apache-2.0
 metadata:
   version: "1.0.0"

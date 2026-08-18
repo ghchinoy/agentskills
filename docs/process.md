@@ -11,7 +11,7 @@ Our primary objective was to build a clean, high-performance Go-based CLI tool t
 1. Scan local directories recursively or public GitHub profiles cleanly.
 2. Store configuration and caches securely following local operating system standards.
 3. Integrate seamlessly with the brand-new, official unified Google GenAI SDK (`google.golang.org/genai`).
-4. Invoke `gemini-3.5-flash` to consolidate, group, and structure developer capabilities into clean, reusable modular prompts and MCP servers.
+4. Invoke `gemini-3.7-flash` to consolidate, group, and structure developer capabilities into clean, reusable modular prompts and MCP servers.
 
 ### Task-Level Hygiene & Tracking
 To enforce production-grade development standards, we integrated **Beads (`bd`)** and Dolt directly into the workflow:
@@ -77,7 +77,7 @@ During verification and dry-runs on the user's 246 repositories, we encountered 
 *   *Solution:* Executed `gcloud services enable aiplatform.googleapis.com --project=generative-bazaar-001` to authorize the AI platform engine.
 
 ### 3. Region Availability and "Global" Endpoint
-*   *Hurdle:* Target-region endpoints (e.g. `us-central1`) threw 404s for the brand-new model `gemini-3.5-flash` because newer stable models are serving-restricted.
+*   *Hurdle:* Target-region endpoints (e.g. `us-central1`) threw 404s for the brand-new model `gemini-3.7-flash` because newer stable models are serving-restricted.
 *   *Solution:* Switched the CLI location config to `global` (`./bin/agentskills config set location global`). The global endpoint correctly resolved, routed, and returned our analysis in under 15 seconds.
 
 ### 4. Build and Hygiene Automation

@@ -11,8 +11,8 @@ import (
 	"google.golang.org/genai"
 )
 
-// ModelName represents the official Gemini 3.5 Flash model identifier.
-const ModelName = "gemini-3.5-flash"
+// ModelName represents the official Gemini 3.7 Flash model identifier.
+const ModelName = "gemini-3.7-flash"
 
 // NewClient initializes and returns the official Google GenAI SDK Client based on the configuration.
 func NewClient(ctx context.Context, cfg *config.Config) (*genai.Client, error) {

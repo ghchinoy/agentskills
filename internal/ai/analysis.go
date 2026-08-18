@@ -11,7 +11,7 @@ import (
 	"google.golang.org/genai"
 )
 
-// GenerateSkillsReport aggregates all discovered agent files, prompts gemini-3.5-flash to analyze them,
+// GenerateSkillsReport aggregates all discovered agent files, prompts gemini-3.7-flash to analyze them,
 // and returns the complete markdown consolidation report.
 func GenerateSkillsReport(ctx context.Context, client *genai.Client, files []scanner.AgentFile) (string, error) {
 	if len(files) == 0 {
@@ -82,22 +82,22 @@ Your report must contain the following sections formatted in beautiful, high-qua
 - Do NOT wrap the entire response in a markdown code block (e.g., do not put triple-backticks or markdown code fence at the start and end of your reply) - output the raw markdown text directly so it can be saved and rendered cleanly.
 `, filesPayload)
 
-	// 3. Invoke gemini-3.5-flash
-	fmt.Fprintln(os.Stderr, "Sending aggregate data to gemini-3.5-flash for consolidation analysis...")
+	// 3. Invoke model
+	fmt.Fprintf(os.Stderr, "Sending aggregate data to %s for consolidation analysis...\n", ModelName)
 	resp, err := client.Models.GenerateContent(ctx, ModelName, genai.Text(prompt), nil)
 	if err != nil {
-		return "", fmt.Errorf("gemini-3.5-flash generation failed: %w", err)
+		return "", fmt.Errorf("%s generation failed: %w", ModelName, err)
 	}
 
 	reportText := resp.Text()
 	if reportText == "" {
-		return "", fmt.Errorf("gemini-3.5-flash returned empty response")
+		return "", fmt.Errorf("%s returned empty response", ModelName)
 	}
 
 	return reportText, nil
 }
 
-// GenerateSkillsReportJSON aggregates all discovered agent files, prompts gemini-3.5-flash to analyze them,
+// GenerateSkillsReportJSON aggregates all discovered agent files, prompts gemini-3.7-flash to analyze them,
 // and returns the structured JSON report string.
 func GenerateSkillsReportJSON(ctx context.Context, client *genai.Client, files []scanner.AgentFile) (string, error) {
 	var sb strings.Builder
@@ -145,23 +145,23 @@ Return only the raw JSON string matching this schema. Do not wrap the JSON in ma
 Input files:
 ` + filesPayload
 
-	fmt.Fprintln(os.Stderr, "Sending aggregate data to gemini-3.5-flash for structured JSON analysis...")
+	fmt.Fprintf(os.Stderr, "Sending aggregate data to %s for structured JSON analysis...\n", ModelName)
 	resp, err := client.Models.GenerateContent(ctx, ModelName, genai.Text(prompt), &genai.GenerateContentConfig{
 		ResponseMIMEType: "application/json",
 	})
 	if err != nil {
-		return "", fmt.Errorf("gemini-3.5-flash structured analysis failed: %w", err)
+		return "", fmt.Errorf("%s structured analysis failed: %w", ModelName, err)
 	}
 
 	reportText := resp.Text()
 	if reportText == "" {
-		return "", fmt.Errorf("gemini-3.5-flash returned an empty report")
+		return "", fmt.Errorf("%s returned an empty report", ModelName)
 	}
 
 	return reportText, nil
 }
 
-// CountTokens counts the number of tokens in the given text using gemini-3.5-flash.
+// CountTokens counts the number of tokens in the given text using gemini-3.7-flash.
 func CountTokens(ctx context.Context, client *genai.Client, text string) (int, error) {
 	contents := []*genai.Content{
 		{

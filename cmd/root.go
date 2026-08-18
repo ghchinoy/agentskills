@@ -22,7 +22,7 @@ var rootCmd = &cobra.Command{
 	Short:   "agentskills is a CLI tool to extract, categorize, and combine AI agent skills",
 	Version: Version,
 	Long: `agentskills parses workspace-level agent rule files (GEMINI.md, CLAUDE.md, AGENTS.md, .cursorrules, etc.) from local directories or GitHub repositories,
-uses gemini-3.5-flash to analyze coding agent conventions, quality gates, and tech stacks,
+uses gemini-3.7-flash to analyze coding agent conventions, quality gates, and tech stacks,
 extracts core capabilities, and recommends how to consolidate them into cohesive skills.`,
 	Example: `  # Check current configuration
   agentskills config show

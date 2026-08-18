@@ -49,7 +49,7 @@ var scanCmd = &cobra.Command{
 	GroupID: "ops",
 	Short:   "Scan and analyze agent instruction and rule files for skills",
 	Long: `Scan local directories or public GitHub repositories for agent instruction and rule files (such as GEMINI.md, CLAUDE.md, AGENTS.md, or .cursorrules),
-analyze them using gemini-3.5-flash, extract skills, and generate a consolidation report.`,
+analyze them using gemini-3.7-flash, extract skills, and generate a consolidation report.`,
 	Example: `  # Scan the current directory recursively and save report to default output path
   agentskills scan --local .
 
@@ -175,7 +175,7 @@ analyze them using gemini-3.5-flash, extract skills, and generate a consolidatio
 		// If human-readable report is requested, also generate the rich markdown report
 		var reportMarkdown string
 		if !jsonOutput {
-			fmt.Printf("\nAnalysing files with %s...\n", ui.Command("gemini-3.5-flash"))
+			fmt.Printf("\nAnalysing files with %s...\n", ui.Command(ai.ModelName))
 			reportMarkdown, err = ai.GenerateSkillsReport(ctx, client, allFiles)
 			if err != nil {
 				return fmt.Errorf("markdown report generation failed: %w", err)

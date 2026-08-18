@@ -1,6 +1,6 @@
 # agentskills
 
-`agentskills` scans, parses, and analyzes AI agent rule and workspace instruction files across local directories or GitHub repositories. It uses `gemini-3.5-flash` via Google Cloud Vertex AI or the Gemini API to find rule duplication (such as task tracking or session-ending workflows) and recommend consolidated agent skills.
+`agentskills` scans, parses, and analyzes AI agent rule and workspace instruction files across local directories or GitHub repositories. It uses `gemini-3.7-flash` via Google Cloud Vertex AI or the Gemini API to find rule duplication (such as task tracking or session-ending workflows) and recommend consolidated agent skills.
 
 ## Supported Agent & Workspace Rule Formats
 
