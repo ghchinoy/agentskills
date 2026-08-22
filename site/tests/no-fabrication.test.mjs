@@ -499,8 +499,40 @@ const TWO_COMPONENT = /(?<!\d)(?<!\d\.)v?\d+\.\d+(?!\.?\d)/;
  */
 const CLI_NAME_SHAPE = /^[a-z0-9](?:[a-z0-9._~-]*[a-z0-9])?$/;
 
-/** Go's major-version suffix: the final element is `vN` for N >= 2. */
-const MAJOR_VERSION_SUFFIX = /^v(\d+)$/;
+/**
+ * Go's major-version suffix. TWO PATTERNS, DELIBERATELY ASYMMETRIC, because the
+ * pop and the reject are different questions and sharing one pattern between
+ * them is a laundering bug:
+ *
+ *   POP is "is this a LEGAL suffix I should strip?" — canonical decimal only,
+ *   no leading zero. `go mod init example.com/x/agentskills/v02` is rc=1,
+ *   "major version suffixes must be in the form of /vN and are only allowed
+ *   for v2 or later". Measured.
+ *
+ *   ANY is "is what remains a version rather than a name?" — deliberately
+ *   broad, so v0, v1, v02, v002 and v1.0 all fail loudly instead of being
+ *   lifted. The dotted forms are here because a generated differential found
+ *   them — an instrument that was built, found this, and was then removed by
+ *   ruling as too much machinery for the job. THE FINDING OUTLIVED THE
+ *   INSTRUMENT, and the evidence is reproducible in one command:
+ *
+ *     go mod init github.com/x/a/v1.0    rc=1
+ *     go mod init github.com/x/a/v2.0    rc=1
+ *     go mod init github.com/x/a/v1.2.3  rc=1
+ *
+ *   all "major version suffixes must be in the form of /vN and are only
+ *   allowed for v2 or later". This function returned "v1.0" for those — a
+ *   clean, plausible name lifted from a path Go refuses to create, which is
+ *   the same laundering as /v02 and /v1. Closed BY SHAPE, not by enumerating
+ *   the cases: the trailing `(?:\.\d+)*` covers the whole dotted family.
+ *
+ * They were one pattern, `/^v(\d+)$/`, and `Number("02") === 2`, so `/v02`
+ * popped as though it were legal and returned a clean `agentskills` out of a
+ * path Go refuses to create. That is the same laundering this function
+ * declines to do for `/v1`, one character along.
+ */
+const MAJOR_VERSION_POP = /^v([1-9]\d*)$/;
+const MAJOR_VERSION_ANY = /^v\d+(?:\.\d+)*$/;
 
 export function declaredCliName(gomod) {
   // Leading whitespace is PERMITTED before the directive. Measured, not
@@ -533,7 +565,7 @@ export function declaredCliName(gomod) {
   // returning `v1` would be the wrong-but-plausible output this whole function
   // exists to prevent. It fails loudly instead.
   const tail = segments[segments.length - 1];
-  const major = MAJOR_VERSION_SUFFIX.exec(tail);
+  const major = MAJOR_VERSION_POP.exec(tail);
   if (major && Number(major[1]) >= 2 && segments.length > 1) segments.pop();
 
   let last = segments.pop();
@@ -554,9 +586,10 @@ export function declaredCliName(gomod) {
   //   so this one is legal and merely useless. Refusing it is policy, not a
   //   claim that the path is malformed.
   //
-  // ONE CHECK COVERS BOTH, and it must stay unconditional: narrowing it to
-  // N >= 2 puts the /v1 case back, which is plant FIX6-kk.
-  if (MAJOR_VERSION_SUFFIX.test(last)) return null;
+  // ONE CHECK COVERS BOTH, and it must stay BROAD: narrowing it to N >= 2
+  // puts the /v1 case back (plant FIX6-kk), and narrowing it to the canonical
+  // POP pattern puts /v02 back (plant FIX6-qq).
+  if (MAJOR_VERSION_ANY.test(last)) return null;
 
   // The gopkg.in convention carries the major version on the element itself
   // (`gopkg.in/yaml.v3`). Host-gated, so a tool legitimately named `foo.v2`
@@ -1265,6 +1298,20 @@ test("controls: a BAD LIFT of the CLI name fails loudly and never scans", async 
     // legal only for v2 and later, so there is no name to lift.
     ["module github.com/ghchinoy/agentskills/v1\n", "a /v1 suffix, which Go refuses"],
     ["module github.com/ghchinoy/agentskills/v0\n", "a /v0 suffix, which Go refuses"],
+    // A LEADING ZERO IS NOT A CANONICAL SUFFIX AND GO REFUSES IT:
+    //   `go mod init example.com/x/agentskills/v02`  -> rc=1
+    //   `go mod init example.com/x/agentskills/v002` -> rc=1
+    // both "major version suffixes must be in the form of /vN and are only
+    // allowed for v2 or later". These lifted a clean "agentskills" until the
+    // pop and the reject were split, because Number("02") === 2.
+    ["module github.com/ghchinoy/agentskills/v02\n", "a leading zero in the suffix, which Go refuses"],
+    ["module github.com/ghchinoy/agentskills/v002\n", "a multi-zero suffix, which Go refuses"],
+    // The dotted family, same refusal message from `go mod init` (rc=1). These
+    // lifted "v1.0" until the reject pattern was widened; see the note above
+    // MAJOR_VERSION_ANY for where they came from.
+    ["module github.com/ghchinoy/agentskills/v1.0\n", "a dotted suffix, which Go refuses"],
+    ["module github.com/ghchinoy/agentskills/v2.0\n", "a dotted suffix at a legal major, still refused"],
+    ["module github.com/x/v02\n", "a leading-zero suffix with only one segment before it"],
     // THESE TWO ARE LEGAL MODULE PATHS AND ARE REFUSED ANYWAY — a POLICY
     // rejection, not a malformation, and labelled as such so this probe set
     // does not assert something false about the specification.

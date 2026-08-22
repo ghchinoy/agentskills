@@ -299,12 +299,30 @@ function paragraphs(body) {
 /**
  * Every place a passage says the deferred documents ARE.
  *
- * KEYED TO THE CLAIM, NOT TO LINK SYNTAX. An earlier version read only
- * `tree/` hrefs, so the identical falsehood written as plain prose — "they all
- * remain in the docs/ directory" — sailed through green, and a `blob/` URL
- * evaded it the same way. Both forms are read here, and the prose side is
- * anchored to directories that REALLY EXIST in this repository so that ordinary
- * words are not mistaken for locations.
+ * TWO SYNTACTIC FORMS ARE READ, AND THE HEADER USED TO OVERSTATE THAT AS
+ * "keyed to the claim, not to link syntax". IT IS NOT. What is actually read:
+ *
+ *   1. a `tree/` or `blob/` href, and
+ *   2. a prose path WITH A TRAILING SLASH naming a directory that really
+ *      exists in this repository.
+ *
+ * MEASURED, so the boundary is stated rather than guessed at:
+ *
+ *   "they all remain in the docs/ directory"   CAUGHT
+ *   "they all remain in the docs directory"    MISSED
+ *   "they all live under docs on GitHub"       MISSED
+ *
+ * The second line is the most natural English phrasing of the exact defect that
+ * shipped, and it is not caught. That is a deliberate boundary, not an
+ * oversight: matching a bare word against a directory list makes every
+ * occurrence of "site" or "docs" in ordinary prose a candidate location, and
+ * false alarms on a correct page are the R2 defect this file was just fixed
+ * for. The trailing slash is the cheapest available signal that the author
+ * meant a PATH.
+ *
+ * THE COST IS REAL AND IS NOT PAPERED OVER: an unslashed prose claim about a
+ * wrong location passes this gate. Recorded in the round-3 report as
+ * not-checked. Do not read this function as covering prose generally.
  */
 export function locativeClaims(passage, realDirs) {
   // Keyed by dir so the same place claimed twice is one claim, but the FORM is
@@ -474,5 +492,115 @@ test("FIX-4: the landing page's deferral claim is true, and scoped to what the r
     /outside the release\s+archive/i.test(sentence) || /not (?:published here|covered)/i.test(text),
     `the landing page no longer disclaims the ${outsideSurface.length} tracked Markdown file(s) ` +
       `outside the release archive: ${outsideSurface.join(", ")}`,
+  );
+});
+
+/**
+ * N2. Every DEFERRED row must carry a real reason.
+ *
+ * WHAT THIS CAN AND CANNOT DO, stated up front so nobody reads it as more than
+ * it is. The reason is prose for a human; no matcher can judge whether it is a
+ * GOOD reason. What is mechanically checkable is that one is PRESENT, that it
+ * is not blank, that it is not the same string pasted across rows, and that it
+ * says something beyond re-naming the file it belongs to. Those are the ways a
+ * reason column actually rots. Anything past that is the reviewer's job and is
+ * declared not-checked in the report.
+ *
+ * Returns one defect object per offending row so that two different rots
+ * produce two different messages rather than colliding.
+ */
+export function reasonDefects(register) {
+  const out = [];
+  const seen = new Map();
+  for (const [doc, reason] of Object.entries(register)) {
+    if (typeof reason !== "string" || reason.trim() === "") {
+      out.push({ doc, why: "the reason is blank" });
+      continue;
+    }
+    const text = reason.trim();
+    // The filename restated is not a reason for deferring the file.
+    const stem = doc.replace(/^.*\//, "").replace(/\.md$/i, "");
+    if (text.replace(new RegExp(stem, "gi"), "").replace(/[^a-z]/gi, "").length === 0) {
+      out.push({ doc, why: "the reason only restates the document's own name" });
+      continue;
+    }
+    const first = seen.get(text);
+    if (first) out.push({ doc, why: `the reason is a duplicate of the one on ${first}` });
+    else seen.set(text, doc);
+  }
+  return out;
+}
+
+test("N2: every deferred document is recorded WITH A REASON, and the page says so", async () => {
+  // VACUITY FIRST. A loop over an empty register asserts nothing, and this gate
+  // would then pass loudest exactly when the register had been emptied.
+  //
+  // READ THE CAVEAT: this assertion is NOT falsifiable today, for the same
+  // reason check 3 above is not. I tried to plant it — emptying DEFERRED — and
+  // prepare-content.mjs rejects the tree at build time ("Every Markdown file
+  // .goreleaser.yaml ships must be either published or explicitly deferred"),
+  // rc=1, before this test runs. So it is a restatement of a build-time
+  // invariant, not a gate, and it must not be counted as coverage. It stays
+  // because it becomes live the moment that build guard is loosened.
+  const rows = Object.entries(DEFERRED);
+  assert.ok(rows.length > 0, "the deferral register is empty; this gate has no population to judge");
+
+  const defects = reasonDefects(DEFERRED);
+  assert.deepEqual(
+    defects.map((d) => `${d.doc}: ${d.why}`),
+    [],
+    `the deferral register records ${rows.length} document(s) but not a reason for each: ` +
+      defects.map((d) => `${d.doc} — ${d.why}`).join("; "),
+  );
+
+  // AND THE CLAIM AND THE GATE ARE DELIBERATELY COUPLED. Until now the page
+  // promised a reason for every deferral and nothing enforced it — a promise
+  // with nothing behind it. The honest configurations are claim-plus-gate or
+  // neither; claim-without-gate is the defect, and gate-without-claim leaves a
+  // rule nobody can see. So removing the sentence fails HERE, which tells the
+  // next editor to remove this test in the same edit rather than discover the
+  // asymmetry later.
+  const body = innerHtml(await readDist("index.html"), '<div class="sl-markdown-content"');
+  const para = paragraphs(body).find((p) => /\bdeferred\b|\bnot published\b/i.test(p.text));
+  assert.ok(para, "the landing page makes no deferral claim at all, so it cannot be claiming reasons");
+  assert.match(
+    para.text,
+    /\breasons?\b/i,
+    "the landing page no longer says the deferrals are recorded with reasons. If that claim was " +
+      "withdrawn on purpose, delete this test in the same edit — leaving it enforces a rule the " +
+      "site no longer states.",
+  );
+});
+
+test("controls: the reason predicate fires on each way a reason column rots", () => {
+  // The live population is clean, so the loop above finds nothing. A matcher
+  // that finds nothing and a matcher that is dead look identical from here.
+  const good = { "a.md": "Phase 7: publishes at /a/.", "b.md": "Phase 7: publishes at /b/." };
+  assert.deepEqual(reasonDefects(good), [], "the predicate invented a defect in a clean register");
+
+  assert.deepEqual(
+    reasonDefects({ ...good, "c.md": "" }).map((d) => d.why),
+    ["the reason is blank"],
+    "an EMPTY reason was not caught — this is the reviewer's Plant B",
+  );
+  assert.deepEqual(
+    reasonDefects({ ...good, "c.md": "   \n  " }).map((d) => d.why),
+    ["the reason is blank"],
+    "a WHITESPACE-ONLY reason was not caught",
+  );
+  assert.deepEqual(
+    reasonDefects({ ...good, "c.md": undefined }).map((d) => d.why),
+    ["the reason is blank"],
+    "a MISSING reason was not caught",
+  );
+  assert.deepEqual(
+    reasonDefects({ ...good, "releasing.md": "releasing" }).map((d) => d.why),
+    ["the reason only restates the document's own name"],
+    "a reason that merely re-names the document was not caught",
+  );
+  assert.deepEqual(
+    reasonDefects({ ...good, "c.md": "Phase 7: publishes at /a/." }).map((d) => d.why),
+    ["the reason is a duplicate of the one on a.md"],
+    "a reason pasted from another row was not caught",
   );
 });
