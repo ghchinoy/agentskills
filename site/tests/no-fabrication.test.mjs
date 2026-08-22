@@ -484,10 +484,43 @@ function scanForAdjacency(line, { shape, subjects, verdict }) {
 // own subject into the class of things the gate cannot verify.
 const TWO_COMPONENT = /(?<!\d)(?<!\d\.)v?\d+\.\d+(?!\.?\d)/;
 
-/** The CLI's own name, from go.mod's module path. Never typed. */
+/**
+ * The CLI's own name, from go.mod's module path. Never typed.
+ *
+ * LIFTING INTRODUCES A FAILURE MODE A LITERAL DOES NOT HAVE, and it is the
+ * reason this function validates instead of just parsing. A typed name cannot
+ * come back empty; a derived one can — go.mod reformatted, the module line
+ * moved or wrapped, a trailing slash on the path, the file unreadable from the
+ * test's working directory. Every one of those yields an empty or nonsense
+ * subject, and a gate scanning for an empty subject PASSES SILENTLY.
+ *
+ * So a bad lift returns null and the caller refuses to run. The one thing this
+ * must never do is return something scannable-but-wrong.
+ */
+const CLI_NAME_SHAPE = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
+
 export function declaredCliName(gomod) {
-  const m = /^module[ \t]+(\S+)[ \t]*$/m.exec(gomod);
-  return m ? m[1].split("/").pop().toLowerCase() : null;
+  const m = /^module[ \t]+(\S+)[ \t]*$/m.exec(String(gomod ?? ""));
+  if (!m) return null;
+  // The RAW last segment. Do NOT drop empty segments first: on a path ending in
+  // a slash that silently promotes the PARENT segment, so `github.com/ghchinoy/`
+  // would yield `ghchinoy` — a perfectly scannable name that is not the tool's.
+  // Wrong-but-plausible is the one outcome this function must never produce.
+  const last = m[1].split("/").pop();
+  if (!last) return null;
+  const name = last.toLowerCase();
+  return CLI_NAME_SHAPE.test(name) ? name : null;
+}
+
+/**
+ * The binary name .goreleaser.yaml declares. A FREE SECOND WITNESS to the name
+ * derived above: two independent declarations in the repository, compared
+ * rather than trusted. Agreement costs nothing; disagreement is a finding, and
+ * the control below reports it rather than picking a winner.
+ */
+export function declaredBinaryName(goreleaser) {
+  const m = /^[ \t]+binary:[ \t]*(\S+)[ \t]*$/m.exec(String(goreleaser ?? ""));
+  return m ? m[1].toLowerCase() : null;
 }
 
 /**
@@ -1150,12 +1183,64 @@ test("controls: a truncated reference to the CLI's own version is caught", async
   assert.equal(declaredCliName("go 1.26.4\n"), null, "the module-path reader invents a name when there is none");
 });
 
+test("controls: a BAD LIFT of the CLI name fails loudly and never scans", async () => {
+  // The failure mode a hand-typed literal does not have. Each of these is a way
+  // the derivation can come back empty or nonsense in real life; every one must
+  // produce null, and null must stop the gate rather than let it scan for
+  // nothing and report a clean sheet.
+  const BAD = [
+    ["", "the file is missing or unreadable"],
+    [null, "the read returned nothing at all"],
+    ["go 1.26.4\n", "there is no module directive"],
+    ["# module github.com/ghchinoy/agentskills\n", "the module line is commented out"],
+    ["module\n", "the directive has no path"],
+    ["module github.com/ghchinoy/\n", "the module path ends in a slash"],
+    ["  module github.com/ghchinoy/agentskills\n", "the directive is indented, so it is not a directive"],
+    ["module github.com/ghchinoy/agent skills\n", "the path is split by whitespace"],
+    ["module github.com/ghchinoy/{{.ProjectName}}\n", "the path is an untemplated placeholder"],
+  ];
+  for (const [gomod, why] of BAD) {
+    assert.equal(
+      declaredCliName(gomod),
+      null,
+      `a bad lift produced a scannable name (${why}): ${JSON.stringify(declaredCliName(gomod))}`,
+    );
+    assert.throws(
+      () => truncatedCliVersions("agentskills 1.3", declaredCliName(gomod)),
+      /hard error rather than a quiet pass/,
+      `the gate SCANNED on a bad lift (${why}) instead of failing loudly`,
+    );
+  }
+
+  // …and the validator is not simply rejecting everything, which would pass the
+  // loop above while disabling the gate permanently.
+  assert.equal(declaredCliName("module github.com/ghchinoy/agentskills\n"), "agentskills");
+  assert.equal(declaredCliName("module\tgithub.com/x/Tool-2\n"), "tool-2");
+
+  // SECOND WITNESS. .goreleaser.yaml declares the shipped binary's name
+  // independently of go.mod. Compared, not trusted — and if the two ever
+  // disagree that is a finding about the repository, not a test to relax.
+  const binary = declaredBinaryName(await read(join(repoRoot, ".goreleaser.yaml")));
+  assert.ok(binary, "no binary name could be read from .goreleaser.yaml; the second witness is dead");
+  assert.equal(
+    declaredCliName(await read(join(repoRoot, "go.mod"))),
+    binary,
+    "go.mod's module path and .goreleaser.yaml's binary name disagree about what this tool is called",
+  );
+});
+
 test("controls: both polarities are ONE predicate under two policies, not two predicates", () => {
   // The failure this guards against is DRIFT, and drift is invisible to every
   // behavioural test in this file: two near-duplicate scanners agree perfectly
   // on the day they are written, and nothing here compares them afterwards. So
   // the structural claim is asserted directly — both callers must delegate, and
   // neither may carry a scanning loop of its own.
+  //
+  // THE STRUCTURAL HALF IS A TRIPWIRE, NOT A PROOF, and should not be read as
+  // one. It is a denylist of ONE SPELLING of the mistake: an agent re-growing a
+  // private loop with indexOf, split, or a while over exec passes it untouched.
+  // The behavioural half below is the real guard. This half only catches the
+  // obvious regrowth cheaply, and catching it cheaply is worth the line.
   for (const [name, fn] of [
     ["handTypedCliVersions", handTypedCliVersions],
     ["truncatedCliVersions", truncatedCliVersions],
