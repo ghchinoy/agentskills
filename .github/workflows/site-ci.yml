@@ -1,0 +1,69 @@
+# site-ci.yml — the pull-request gate for the agentskills CLI docs site.
+#
+# The site lives inside the repository whose docs it renders, so a pull request
+# that edits `docs/users_guide.md` builds the site on that pull request: a
+# missing source, an unclassified new `docs/*.md`, a heading that stops
+# rendering, all fail HERE, attributed to the change that caused them.
+#
+# That is why `paths:` includes `docs/**`, `skills/**` and `.goreleaser.yaml`
+# and not only `site/**`. A content-only change can break the site build, and
+# `.goreleaser.yaml` IS the site's page allowlist (proposal §7.1) — editing it
+# changes what the site must classify, so it has to run this gate.
+#
+# It builds and tests. It does NOT deploy — deployment is docs.yml, on `main`.
+# site/tests/workflows.test.mjs asserts the absence of every Pages deployment
+# action and of `pages: write` here, with a positive control.
+name: site-ci
+
+on:
+  pull_request:
+    # Deliberately NOT filtered by base branch: a pull request into a working
+    # branch must be gated too.
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'skills/**'
+      - '.goreleaser.yaml'
+      - 'site/**'
+      # Both workflow files, so a change to either is built and tested on the
+      # pull request that makes it. docs.yml watches only itself, because it
+      # deploys and site-ci.yml has no effect on what it deploys.
+      - '.github/workflows/site-ci.yml'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: site
+
+      # Build BEFORE test, and as its own step: most of the suite asserts on the
+      # rendered bytes in dist/, and a build failure should be reported as a
+      # build failure naming the source file, not buried in a test log.
+      - name: Build the site
+        run: npm run build
+        working-directory: site
+
+      - name: Run the guardrail suite
+        run: npm test
+        working-directory: site

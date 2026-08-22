@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="agentskills CLI">
+  <!-- Presentation only. A terminal prompt mark, in the accent colour from
+       src/styles/tokens.css. Nothing here encodes a fact about the tool.
+       It exists because Starlight references /favicon.svg on every page, and a
+       referenced asset that is not built is a broken link on every page. -->
+  <rect width="32" height="32" rx="7" fill="#4f5bd5"/>
+  <path d="M9 11l5 5-5 5" fill="none" stroke="#ffffff" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M17 21h6" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,83 @@
+/*
+ * tokens.css — the brand seam.
+ *
+ * ONE stylesheet, mapping Starlight's own `--sl-*` custom properties, so the
+ * catalog is visibly its own thing rather than stock Starlight. Restrained on
+ * purpose: a palette, a type scale and two accents. No glassmorphism, no
+ * gradients on text, no animation.
+ *
+ * This file is also the artefact site B copies (proposal §5). Copy, do not
+ * package: a published theme package needs a registry, a version, a release
+ * process and a build-order constraint in two repos, to deduplicate about a
+ * hundred lines of CSS variables between two sites owned by one person. Drift
+ * is visible (the sites stop matching) and cheap to fix (copy again). Revisit
+ * at a third site.
+ *
+ * Every value below is a presentation choice. Nothing here encodes a fact
+ * about the catalog.
+ */
+
+:root {
+  /* Accent — a deep indigo, distinct from Starlight's stock purple. */
+  --sl-color-accent-low: #1b1d47;
+  --sl-color-accent: #4f5bd5;
+  --sl-color-accent-high: #c3c8f5;
+
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #eceef4;
+  --sl-color-gray-2: #c2c6d4;
+  --sl-color-gray-3: #8b90a3;
+  --sl-color-gray-4: #575c6f;
+  --sl-color-gray-5: #383c4c;
+  --sl-color-gray-6: #23262f;
+  --sl-color-black: #16181f;
+
+  --sl-content-width: 50rem;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #d6d9f7;
+  --sl-color-accent: #3d47b8;
+  --sl-color-accent-high: #1c2160;
+
+  --sl-color-white: #16181f;
+  --sl-color-gray-1: #23262f;
+  --sl-color-gray-2: #3d4152;
+  --sl-color-gray-3: #62667a;
+  --sl-color-gray-4: #9298ab;
+  --sl-color-gray-5: #c9cdda;
+  --sl-color-gray-6: #eef0f6;
+  --sl-color-gray-7: #f7f8fc;
+  --sl-color-black: #ffffff;
+}
+
+/* Type: a slightly tighter measure and a monospace that reads as a catalog. */
+:root {
+  --sl-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --sl-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* The site title reads as an identifier, matching the catalog's subject. */
+.site-title {
+  letter-spacing: -0.01em;
+  font-weight: 650;
+}
+
+/* Long declared descriptions (up to 790 characters in this repo) are rendered
+   in full and unclipped — no line-clamp, no ellipsis, no max-height. I9. */
+.sl-markdown-content p,
+.entry-description {
+  text-wrap: pretty;
+}
+
+/* Inline code inside prose: enough contrast to distinguish a filename from
+   surrounding text, which this catalog's bodies do constantly. */
+.sl-markdown-content :not(pre) > code {
+  background: var(--sl-color-gray-6);
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
