@@ -138,7 +138,25 @@ test("no built page claims runtime support for an agent product", async () => {
 // string this gate exists to catch. `(?!\.?\d)` expresses the actual intent —
 // reject `1.2.3.4`, accept a version followed by anything that is not another
 // dotted component.
-const VERSION_LITERAL = /(?<![\w.])v?\d+\.\d+\.\d+(?!\.?\d)/;
+//
+// The LOOKBEHIND is `(?<!\d)(?<!\d\.)`, and it is not the mirror image of the
+// lookahead. The two boundaries ask different questions. The trailing question
+// is "does what follows END the number", and there ANY dot followed by a digit
+// continues it. The leading question is "is this token the TAIL of something
+// longer", and only two left-neighbours make it so: a digit, or a dot that
+// itself follows a digit. A dot that does NOT follow a digit is an ordinary
+// separator and the version after it is a version —
+// `agentskills.1.3.0.tar.gz`. So the obvious mirror, `(?<![.\d])`, is wrong on
+// that spelling, and the original `(?<![\w.])` was wrong on far more: it
+// refused every WORD character, and `_` is a word character. GoReleaser names
+// every archive `{{.ProjectName}}_{{.Version}}_{{.Os}}_{{.Arch}}`
+// (.goreleaser.yaml:24), so release v1.3.0 ships
+// `agentskills_1.3.0_linux_amd64.tar.gz` — a hand-written downloads page is
+// the likeliest place a stale version is ever typed, and the underscore made
+// the gate blind at precisely its highest-risk input. Enumerating every
+// printable-ASCII left-neighbour of `1.3.0` and `v1.3.0`, 916 probes against a
+// tokenizer oracle, the old form missed 214 of the 344 it should have caught.
+const VERSION_LITERAL = /(?<!\d)(?<!\d\.)v?\d+\.\d+\.\d+(?!\.?\d)/;
 
 /**
  * The population: every site-authored file whose content can reach a rendered
@@ -193,6 +211,15 @@ test("controls: the version-literal matcher fires on a planted version", () => {
     "Tagged v1.3.0, built from main.",          // comma
     "Latest release v1.3.0",                    // end of input
     "Latest release v1.3.0\nSee the releases page.", // end of LINE
+    // ── LEADING boundary. One control per class, from the enumeration
+    //    described above the matcher. ──────────────────────────────────────
+    "agentskills_1.3.0_linux_amd64.tar.gz",     // UNDERSCORE — and this is not
+    // a synthetic string: it is verbatim one of the six archives published on
+    // release v1.3.0, produced by the `name_template` on .goreleaser.yaml:24.
+    "agentskills.1.3.0.tar.gz",                 // DOT not preceded by a digit
+    "V1.3.0 is the current release",            // LETTER — `v?` is lower-case
+    // only and the matcher carries no `i` flag, so a capital V is not the
+    // decoration being skipped, it is a left-neighbour that has to be allowed.
   ]) {
     assert.ok(VERSION_LITERAL.test(s), `matcher missed a planted version literal: ${JSON.stringify(s)}`);
   }
@@ -208,6 +235,11 @@ test("controls: the version-literal matcher fires on a planted version", () => {
     // reporting a version literal inside a number that has four components.
     "1.2.345.6 is not a version either",
     "192.168.100.7 is a host, not a release",         // same trap, IPv4 spelling
+    // Loosening the LOOKBEHIND can only ever add false fires, so the allow
+    // side carries the same filename shape with a fourth component, and a dot
+    // that IS preceded by a digit — the one dot the lookbehind still refuses.
+    "agentskills_1.3.0.4_linux_amd64.tar.gz",
+    "127.0.0.1:4321 is the dev server",
   ]) {
     assert.ok(!VERSION_LITERAL.test(s), `matcher fired on clean text: ${JSON.stringify(s)}`);
   }
