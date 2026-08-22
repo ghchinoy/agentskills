@@ -34,18 +34,21 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import {
   PAGES,
   DEFERRED,
   GORELEASER,
   classifyDrift,
+  isPrunedDir,
   markdownSurface,
   parseArchiveFiles,
   inDeclaredSurface,
 } from "../scripts/prepare-content.mjs";
-import { repoRoot } from "./_helpers.mjs";
+import { repoRoot, siteRoot } from "./_helpers.mjs";
 
 // The declared published surface, transcribed BY HAND from `.goreleaser.yaml`'s
 // `archives.files` block. This is a control on the parser, derived from the
@@ -136,6 +139,83 @@ test("the candidate set is re-derivable by an independent walk", async () => {
   );
   // A candidate set of zero would make every assertion below vacuous.
   assert.ok(mine.length > 0, "the candidate set is empty — the gate would check nothing");
+});
+
+// ── The pruning boundary, and the build gate over a nested path ─────────────
+//
+// The walk in prepare-content.mjs prunes some directories for speed. Pruning is
+// the one thing that can remove a file from the candidate set BEFORE the drift
+// decision ever sees it, so a prune that is wider than intended is a hole in
+// the gate rather than a slow build. The two tests below pin the boundary from
+// both sides: the predicate directly, and the real build over a planted file.
+
+test("control: pruning is anchored at the repo root and cannot swallow a docs/ subtree", () => {
+  // Pruned: these are top-level directories that hold no publishable source.
+  for (const d of [".git", "node_modules", "site", "bin", "dist"]) {
+    assert.equal(isPrunedDir(d), true, `${d}/ at the repo root should be pruned from the walk`);
+  }
+  // NOT pruned: the same NAMES nested inside the declared surface. This is the
+  // whole finding — `docs/**/*` is shipped in the release archive, so a
+  // Markdown file under `docs/bin/` reaches users and must reach the gate.
+  for (const d of [
+    "docs",
+    "skills",
+    "docs/bin",
+    "docs/dist",
+    "docs/site",
+    "docs/node_modules",
+    "skills/agentskills/bin",
+    "site-notes", // a prefix of a pruned name is not a pruned name
+  ]) {
+    assert.equal(isPrunedDir(d), false, `${d}/ must NOT be pruned — it can hold a shipped Markdown file`);
+  }
+});
+
+test("AC3 regression: an unclassified doc under docs/bin/ FAILS the build", async () => {
+  // Planted at a NESTED path whose basename collides with a pruned top-level
+  // directory. A top-level plant cannot detect this class: it is precisely the
+  // depth that used to make the file invisible to the walk.
+  const rel = "docs/bin/phase6-nested-prune-probe.md";
+  const dir = join(repoRoot, "docs", "bin");
+  const file = join(repoRoot, "docs", "bin", "phase6-nested-prune-probe.md");
+  assert.equal(existsSync(dir), false, `${dir} already exists — this test refuses to plant into a real directory`);
+
+  await mkdir(dir, { recursive: true });
+  await writeFile(file, "# nested prune probe\n\nPlanted by allowlist-drift.test.mjs.\n", "utf8");
+  try {
+    // Vacuity guard: if the plant were NOT in the declared surface, everything
+    // below would pass for a reason that has nothing to do with the gate.
+    assert.equal(
+      inDeclaredSurface(rel, TRANSCRIBED_SURFACE),
+      true,
+      `${rel} is not inside the declared surface — the plant is in the wrong place and proves nothing`,
+    );
+
+    assert.ok(
+      (await markdownSurface()).includes(rel),
+      `${rel} is shipped by .goreleaser.yaml but never entered the module's candidate set — ` +
+        `the walk pruned a directory inside the declared surface`,
+    );
+    assert.deepEqual((await classifyDrift()).unclassified, [rel]);
+
+    // AND THE BUILD ITSELF, not just the predicate. `npm run build` runs this
+    // script as its prebuild step; a non-zero exit here is the build failing.
+    const res = spawnSync(process.execPath, [join(siteRoot, "scripts", "prepare-content.mjs")], {
+      cwd: siteRoot,
+      encoding: "utf8",
+    });
+    assert.equal(
+      res.status,
+      1,
+      `prepare-content.mjs exited ${res.status}: the BUILD-TIME gate did not fire on an ` +
+        `unclassified file inside the release-archive surface.\n${res.stdout}${res.stderr}`,
+    );
+    assert.match(res.stderr, /UNCLASSIFIED source\(s\)/);
+    assert.ok(res.stderr.includes(rel), `the build failed but did not name ${rel}:\n${res.stderr}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+  assert.equal(existsSync(dir), false, "the planted docs/bin/ directory was not cleaned up");
 });
 
 test("controls: the drift predicate produces a failure when there is drift", async () => {

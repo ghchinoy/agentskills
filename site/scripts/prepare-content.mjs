@@ -170,18 +170,43 @@ export function inDeclaredSurface(relPath, patterns) {
 // is. Every path below is already outside the declared surface; skipping them
 // only avoids walking large trees. tests/allowlist-drift.test.mjs re-derives
 // the candidate set with its own walk that does not share this list.
-const SKIP_DIRS = new Set([".git", "node_modules", "site", "bin", "dist"]);
+//
+// ── PRUNING IS ANCHORED AT THE REPO ROOT, AND THAT IS LOAD-BEARING ──────────
+//
+// These are paths, not names. An earlier form of this list was matched against
+// each directory's BASENAME at every depth, which quietly took `docs/bin/`,
+// `docs/dist/` and `docs/site/` out of the walk — directories that are inside
+// `docs/**/*`, i.e. inside the surface `.goreleaser.yaml` declares it ships. A
+// Markdown file planted at `docs/bin/hidden.md` was therefore shipped to users,
+// classified by neither table, and `npm run build` still exited 0: the gate
+// this module documents two paragraphs above could not fail for that input.
+//
+// Pruning may only ever remove paths that CANNOT be in the declared surface.
+// Anchoring at the root is what guarantees that: `docs/` and `skills/` are not
+// in this list, so nothing beneath them can be pruned, whatever a subdirectory
+// happens to be called.
+const SKIP_ROOT_DIRS = new Set([".git", "node_modules", "site", "bin", "dist"]);
+
+/**
+ * True when a directory may be skipped by the walk. `relDirPath` is
+ * repo-relative and "/"-separated, so a top-level directory is exactly a name
+ * with no separator in it — and a nested one can never compare equal.
+ */
+export function isPrunedDir(relDirPath) {
+  return SKIP_ROOT_DIRS.has(relDirPath);
+}
 
 /** Every tracked-looking file under the repo, repo-relative, "/"-separated. */
 async function walkRepo(dir = repoRoot) {
   const out = [];
   for (const ent of await readdir(dir, { withFileTypes: true })) {
     const abs = join(dir, ent.name);
+    const rel = relative(repoRoot, abs).split(sep).join("/");
     if (ent.isDirectory()) {
-      if (SKIP_DIRS.has(ent.name)) continue;
+      if (isPrunedDir(rel)) continue;
       out.push(...(await walkRepo(abs)));
     } else {
-      out.push(relative(repoRoot, abs).split(sep).join("/"));
+      out.push(rel);
     }
   }
   return out;
