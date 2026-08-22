@@ -17,5 +17,8 @@ which targets the [Agent Plugins](https://agent-plugins.org) standard.
 
 - [User's Guide](./users-guide/) — building, configuring, authenticating and running the CLI.
 
-The repository's remaining documentation is not published here yet; it is in
-[`docs/`](https://github.com/ghchinoy/agentskills/tree/main/docs) on GitHub.
+Only the User's Guide is published here so far. The other five documents shipped in the CLI's
+release archive are deferred to a later phase, each recorded with a reason; they remain in the
+[repository](https://github.com/ghchinoy/agentskills) on GitHub. Documentation outside the release
+archive — agent instructions, issue-tracker notes and test fixtures — is not published here and is
+not covered by that record.

@@ -26,7 +26,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { PAGES, markdownSurface } from "../scripts/prepare-content.mjs";
+import { execFileSync } from "node:child_process";
+import { DEFERRED, PAGES, markdownSurface } from "../scripts/prepare-content.mjs";
 import {
   BASE,
   dist,
@@ -249,4 +250,108 @@ test("the published sources contain no relative Markdown link (none to rewrite y
       `resolve them:\n  ${relative.join("\n  ")}`,
   );
   assert.ok(total > 0, "no Markdown links found at all — the matcher is dead, not the corpus empty");
+});
+
+// ── FIX-4: THE LANDING PAGE'S DEFERRAL CLAIM ────────────────────────────────
+//
+// The landing page tells the reader what is NOT here. That sentence had no gate
+// at all: replacing it with a flat contradiction left the suite fully green, so
+// every property below was free to rot silently, and two of them already had.
+//
+// The sentence made two claims and both were false. It said the remaining
+// documentation "is in docs/" — but README.md and skills/agentskills/SKILL.md
+// are deferred and neither is under docs/. And it ranged over THE REPOSITORY,
+// while the register behind it ranges only over the release-archive surface, so
+// AGENTS.md, .beads/README.md, .agents/skills/beads/SKILL.md and four testdata
+// files were silently claimed as "recorded" by a register that cannot hold them.
+//
+// The repair scopes the sentence to the surface the register actually covers,
+// and this gate holds it there. Note which way the checks run: the page is
+// measured AGAINST THE REGISTER, and the register against .goreleaser.yaml via
+// the build's own markdownSurface — never the reverse. A gate that read its
+// expectations off the page would certify whatever the page happened to say.
+const WORD_NUMBERS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+
+/** Tracked Markdown, so "outside the surface" is a measured set, not a belief. */
+function trackedMarkdown() {
+  return execFileSync("git", ["ls-files", "*.md"], { cwd: repoRoot })
+    .toString().trim().split("\n").filter(Boolean);
+}
+
+test("FIX-4: the landing page's deferral claim is true, and scoped to what the register covers", async () => {
+  const html = await readDist("index.html");
+  const body = innerHtml(html, '<div class="sl-markdown-content"');
+  assert.ok(body, "landing page has no rendered markdown region");
+  const text = toText(body).replace(/\s+/g, " ");
+
+  // VACUITY. Everything below ranges over this sentence, so if it is gone the
+  // whole test would pass by having nothing to judge. Delete the claim and this
+  // is what fails.
+  const claim = /[^.]*\bdeferred\b[^.]*\./i.exec(text);
+  assert.ok(claim, "the landing page no longer makes any deferral claim; this gate has nothing to check");
+  const sentence = claim[0];
+
+  // 1. THE COUNT. Spelled on the page, derived from the register here. Publish
+  //    a sixth page or defer a sixth document and the page's number goes stale.
+  const counted = /\b(one|two|three|four|five|six|seven|eight|nine|ten)\b\s+(?:more\s+|other\s+|further\s+)?document/i.exec(sentence);
+  assert.ok(counted, `the deferral claim states no count of deferred documents: ${JSON.stringify(sentence)}`);
+  assert.equal(
+    WORD_NUMBERS[counted[1].toLowerCase()],
+    Object.keys(DEFERRED).length,
+    `the landing page says ${counted[1]} deferred documents; the register holds ${Object.keys(DEFERRED).length}`,
+  );
+
+  // 2. THE LOCATIVE HALF — the defect that shipped. Any repository path the
+  //    sentence points at must actually contain EVERY deferred document. The
+  //    old sentence named docs/, which holds three of the five.
+  const links = [...body.matchAll(/href="https:\/\/github\.com\/[^/]+\/[^/]+\/tree\/[^/]+\/([^"]*)"/g)]
+    .map((m) => decodeURIComponent(m[1]).replace(/\/$/, ""))
+    .filter((p) => p && sentence.includes("deferred"));
+  for (const dir of links) {
+    const outside = Object.keys(DEFERRED).filter((k) => !k.startsWith(`${dir}/`));
+    assert.deepEqual(
+      outside,
+      [],
+      `the landing page locates the deferred documents in ${JSON.stringify(dir)}, ` +
+        `but these are not inside it: ${outside.join(", ")}`,
+    );
+  }
+
+  // 3. THE STRUCTURAL HALF — and READ THE CAVEAT, because this one assertion is
+  //    NOT load-bearing and must not be counted as though it were.
+  //
+  //    It restates a correspondence prepare-content.mjs already enforces at
+  //    build time: every candidate must be in PAGES or DEFERRED, so surface
+  //    minus published ALWAYS equals DEFERRED whenever the build succeeds. I
+  //    tried to plant against it — dropping a DEFERRED row — and the build
+  //    rejected the tree before this test ran, so I have no perturbation that
+  //    reaches this line. It is unfalsifiable while that guard stands.
+  //
+  //    It stays because it is what ties the page's SCOPE to the register, and
+  //    if the build guard is ever loosened this becomes live. But it is a
+  //    restatement, not a gate, and it is labelled so that nobody reads it as
+  //    coverage this file provides.
+  const surface = await markdownSurface();
+  const published = PAGES.map((p) => p.src);
+  assert.deepEqual(
+    surface.filter((f) => !published.includes(f)).sort(),
+    Object.keys(DEFERRED).sort(),
+    "the release-archive surface minus the published pages is not what DEFERRED records, " +
+      "so the landing page's scoping sentence no longer describes the register",
+  );
+
+  // 4. …and the scoping is LOAD-BEARING rather than decorative. If nothing lay
+  //    outside the surface, the sentence disclaiming it would be a true
+  //    statement about an empty set and this whole distinction would be noise.
+  const outsideSurface = trackedMarkdown().filter((f) => !surface.includes(f) && !f.startsWith("site/"));
+  assert.ok(
+    outsideSurface.length > 0,
+    "no tracked Markdown lies outside the release-archive surface, so the landing page's " +
+      "out-of-scope sentence describes an empty set and cannot be load-bearing",
+  );
+  assert.ok(
+    /outside the release\s+archive/i.test(sentence) || /not (?:published here|covered)/i.test(text),
+    `the landing page no longer disclaims the ${outsideSurface.length} tracked Markdown file(s) ` +
+      `outside the release archive: ${outsideSurface.join(", ")}`,
+  );
 });
