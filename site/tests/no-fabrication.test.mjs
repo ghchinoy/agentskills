@@ -165,7 +165,7 @@ const VERSION_LITERAL = /(?<!\d)(?<!\d\.)v?\d+\.\d+\.\d+(?!\.?\d)/;
 // the correct one — the name is the specification, the assertion was the
 // implementation, and it is the specification the gate owes a reader.
 //
-// The gap is not hypothetical. SIX strings this repository really produces are
+// The gap is not hypothetical. FIVE strings this repository really produces are
 // true, are not the CLI's version, and every one of them fired the gate:
 //
 //     Building the site requires Node >= 22.19.0.   site/package.json engines.node
@@ -173,9 +173,16 @@ const VERSION_LITERAL = /(?<!\d)(?<!\d\.)v?\d+\.\d+\.\d+(?!\.?\d)/;
 //     Uses @astrojs/starlight 0.41.7 ...            dependency pin
 //     Image handling comes from sharp 0.35.3.       dependency pin
 //     We conform to Semantic Versioning 2.0.0.      docs/releasing.md:8
-//     Requires Go 1.24.0 or later to build.         go.mod toolchain prose
 //
-// All six measured RED at 02221f55, planted one at a time into this gate's own
+// cert §2.8 listed a SIXTH, "Requires Go 1.24.0 or later to build.", sourced to
+// go.mod toolchain prose. No such string exists in this repository — the real
+// prose is `Go 1.22+` (docs/development.md:9) and `Go 1.22 or higher`
+// (docs/users_guide.md:10), both TWO-component and therefore invisible to a
+// matcher that requires three. cert withdrew the row on discovering it. It is
+// recorded here rather than quietly dropped, because a fabricated row inside
+// the finding about a fabrication gate is the most instructive thing in it.
+//
+// All five measured RED at 02221f55, planted one at a time into this gate's own
 // population. Today that population is clean, so the gate is green — but the
 // first time anyone documents the Node floor or the SemVer standard, the gate
 // blocks a TRUE statement and its message tells the author to derive a CLI
@@ -293,27 +300,24 @@ const ATTESTED_SUBJECTS = {
 // to 7.3.0 is no longer true, and a gate that stays quiet about it is the same
 // failure in a different costume.
 //
-// ── THE ONE SUBJECT THIS CANNOT COVER ───────────────────────────────────────
+// ── THERE IS NO CARVE-OUT, AND THERE ALMOST WAS ────────────────────────────
 //
-// `go` has no pin in package.json. Its version IS lifted (go.mod says
-// `go 1.26.4`) and is recorded, not suppressed — but the comparison is NOT
-// applied to it, and that is a decision with a reason and a cost.
+// `go` has no pin in package.json, so it was briefly exempted from the check
+// above and kept adjacency-only — which left `Go 1.3.0` excused. The stated
+// justification was that cert §2.8 required "Requires Go 1.24.0 or later to
+// build." to pass, and go.mod declares 1.26.4.
 //
-// The reason: the cert report is the specification, and cert §2.8 lists
-// "Requires Go 1.24.0 or later to build." among the six real statements the old
-// gate wrongly blocked. `1.24.0` is not `1.26.4`, so an equality check on `go`
-// turns a string the specification requires GREEN into a violation. The
-// specification wins over a fix I prefer.
+// THAT SENTENCE IS NOT IN THIS REPOSITORY. cert grepped for it, found nothing,
+// and withdrew the row: the real toolchain prose is two-component (`Go 1.22+`)
+// and never reaches attribution at all. The exemption was justified by a
+// fabricated requirement, which is exactly the failure this file gates.
 //
-// The cost, stated so nobody has to find it: `Go 1.3.0` is excused. That is the
-// residual of cert's class, narrowed from every declared dependency down to one
-// subject. It is reported to cert alongside this change rather than left here
-// to be discovered.
-//
-// Everything NOT in this set fails CLOSED: a subject whose declaration cannot
-// be resolved to a version is reported, never excused. A control below asserts
-// that every derived subject either carries a pin or is named here.
-const PIN_EXEMPT = new Set(["go"]);
+// So `go` is pinned like everything else, from go.mod rather than package.json,
+// and PIN_EXEMPT IS EMPTY. It is kept — as an empty set with a live control —
+// because the next subject that cannot be pinned will want to be added to it,
+// and that should be a visible, argued edit rather than a silent fallback to
+// adjacency. An empty exempt set is the strongest state this control can be in.
+const PIN_EXEMPT = new Set([]);
 
 /** The `x.y.z` core of a declaration — `^7.2.4`, `>=22.19.0`, `v1.3.0` all
  *  carry one. Returns null when a declaration names no version at all. */
@@ -624,11 +628,13 @@ const GATE_CASES = [
   ["Gonzo 1.3.0", ["1.3.0"], "cert B9: Gonzo begins with go"],
   ["Logo 1.3.0", ["1.3.0"], "cert B9: Logo ends in go"],
 
-  // ── The RESIDUAL of cert's class, asserted so it cannot be forgotten. `go`
-  //    is pin-exempt because cert §2.8 requires "Go 1.24.0 or later" to pass,
-  //    so `go` alone still launders a literal. One subject, not fifteen.
-  ["Go 1.3.0", [], "RESIDUAL HOLE: go is pin-exempt, so adjacency alone excuses"],
-  ["Requires Go 1.24.0 or later to build.", [], "cert 2.8: why go is pin-exempt"],
+  // ── cert's class has NO survivor. `go` is pinned from go.mod, so the last
+  //    carve-out is gone. The three rows cert asked to see before the
+  //    exemption was dropped:
+  ["Go 1.3.0", ["1.3.0"], "cert: the former residual hole, now CLOSED"],
+  ["Built with Go 1.26.4 here", [], "go is excused at the version go.mod declares"],
+  ["Go 1.22 or higher installed", [], "the REAL prose: two-component, never reaches attribution"],
+  ["Go 1.22+ installed", [], "the REAL prose, development.md spelling"],
 
   // ── skills-site-p6-rev's class: a subject that is not in package.json ──
   //     Their control, not mine. Marked so it is not counted as independent.
@@ -773,7 +779,12 @@ test("controls: every attributable subject is either pinned or named as exempt",
       `PIN_EXEMPT names ${JSON.stringify(name)}, which is not an attributable subject at all`,
     );
   }
-  assert.deepEqual([...PIN_EXEMPT], ["go"], "the pin exemption list has grown; each entry is a hole");
+  assert.deepEqual(
+    [...PIN_EXEMPT],
+    [],
+    "the pin exemption list is no longer empty. Every entry is a subject excused by adjacency " +
+      "alone, which is the hole cert measured — adding one needs an argument, not a default.",
+  );
 });
 
 test("controls: B11 — the CLI's own name can never become attributable", async () => {
