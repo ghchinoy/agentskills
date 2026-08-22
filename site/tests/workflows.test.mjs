@@ -20,6 +20,14 @@
 //     adding `branches: [main]` would silently stop gating exactly the pull
 //     requests this phase is made of. The comment at the deviation site says
 //     so; this file is what makes that comment load-bearing.
+//   * docs.yml is triggered by `push` and `workflow_dispatch` and by NOTHING
+//     ELSE — in particular not `release:` and not `create:`.
+//   * site-ci.yml is triggered by `pull_request` and by NOTHING ELSE.
+//   * site-ci.yml holds EXACTLY the permission `contents: read` and no other,
+//     in any spelling.
+//   * site-ci.yml uses EXACTLY `actions/checkout` and `actions/setup-node`, and
+//     runs EXACTLY `npm ci`, `npm run build` and `npm test` — so it cannot
+//     deploy by any action or any shell command, named or unnamed.
 //
 // Every absence assertion below is paired with a POSITIVE CONTROL that runs the
 // same matcher over text which does contain the forbidden thing. "No
@@ -36,6 +44,25 @@
 // naming the matcher — if any matcher is ever asserted absent without also
 // being proved alive. Adding an unpaired absence assertion is now a test
 // failure rather than a quietly false sentence.
+//
+// AND FOUR OF THOSE ROWS SAY "NOTHING ELSE", WHICH A MATCHER CANNOT SAY. The
+// rows above about `startsWith` and `cancel-in-progress: true` name ONE
+// forbidden form each, and a regex is the right instrument for them. The four
+// rows added last are different in kind: site-ci.yml's comment claims "the
+// absence of EVERY Pages deployment action", and docs.yml's claims the trigger
+// is "not a tag or release trigger". A blacklist cannot enforce "every" — it
+// enforces "every one I thought of", and it was measured failing exactly there:
+// `peaceiris/actions-gh-pages`, `JamesIves/github-pages-deploy-action` and
+// `run: npx gh-pages -d dist` all deployed straight past a matcher that names
+// the three `actions/*` Pages actions, and `pages: 'write'` walked past a
+// matcher for `pages: write` because YAML lets you quote a scalar.
+//
+// So those four rows are enforced as WHITELISTS instead: the set of triggers,
+// of permissions, of `uses:` and of `run:` must EQUAL a pinned set. An unknown
+// deploy action is not on the list and fires without anyone having named it.
+// The cost is deliberate and is the point — adding a legitimate step to
+// site-ci.yml now requires editing the pinned set in this file, which is what
+// makes the set a decision rather than a description.
 //
 // AND THE PLANT ITSELF IS THE UNEXAMINED PREMISE. A positive control that
 // string-replaces into the RAW file can land in a prose comment — `docs.yml`
@@ -121,13 +148,113 @@ function planted(artefact, needle, what) {
 }
 
 /**
+ * The body of a top-level `key:` BLOCK, or null when there is no such block.
+ *
+ * Null is a real answer and not an error: `permissions: write-all` is a
+ * top-level `permissions` with no block at all, and a caller that treats null
+ * as "nothing to check" would pass the single broadest permission grant GitHub
+ * offers. Every caller below treats null as FIRING.
+ */
+export function topBlock(yaml, key) {
+  const m = new RegExp(`^${key}:\\n((?:[ \\t].*\\n|\\n)*)`, "m").exec(yaml);
+  return m ? m[1] : null;
+}
+
+/**
  * The `on:` trigger block, which is the artefact the S8 claim is ABOUT. A
  * `branches:` key elsewhere in the file is a different statement, so the claim
  * is evaluated over the block and not over the whole file.
  */
 export function onBlock(yaml) {
-  const m = /^on:\n((?:[ \t].*\n|\n)*)/m.exec(yaml);
-  return m ? m[1] : null;
+  return topBlock(yaml, "on");
+}
+
+/**
+ * The keys of a block at the block's OWN indent. `branches:` and `paths:` are
+ * how a trigger is configured, not triggers themselves, so only the shallowest
+ * level counts. The indent is measured rather than assumed, so re-indenting a
+ * file does not silently empty the set.
+ */
+export function blockKeys(body) {
+  if (body === null) return null;
+  const lines = body.split("\n").filter((l) => l.trim() !== "");
+  if (lines.length === 0) return [];
+  const base = Math.min(...lines.map((l) => /^[ \t]*/.exec(l)[0].length));
+  return lines
+    .filter((l) => /^[ \t]*/.exec(l)[0].length === base)
+    .map((l) => /^[ \t]*([\w-]+):/.exec(l))
+    .filter(Boolean)
+    .map((m) => m[1]);
+}
+
+/**
+ * `permissions:` as normalised `key: value` strings. Quotes and run-together
+ * spacing are removed, because `pages: write`, `pages:   write` and
+ * `pages: 'write'` are the same grant to GitHub and differ only to a regex.
+ */
+export function permissionEntries(yaml) {
+  const body = topBlock(yaml, "permissions");
+  if (body === null) return null;
+  return body
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => {
+      const m = /^[ \t]*([\w-]+):[ \t]*(.*?)[ \t]*$/.exec(l);
+      return m ? `${m[1]}: ${m[2].replace(/^['"]|['"]$/g, "")}` : l.trim();
+    });
+}
+
+/** Every `uses:` value in the file — the actions this workflow can run. */
+export function usesValues(yaml) {
+  return [...yaml.matchAll(/^[ \t]*-?[ \t]*uses:[ \t]*(\S+)[ \t]*$/gm)].map((m) => m[1]);
+}
+
+/**
+ * Every `run:` value in the file — the shell this workflow can run. A block
+ * scalar (`run: |`) yields `"|"`, which is not on any pinned list and so fires:
+ * a multi-line script is exactly where a deploy command would hide, and it
+ * should have to be re-pinned deliberately rather than admitted silently.
+ */
+export function runValues(yaml) {
+  return [...yaml.matchAll(/^[ \t]*-?[ \t]*run:[ \t]*(.+?)[ \t]*$/gm)].map((m) => m[1]);
+}
+
+/**
+ * The whitelist rows. Each is an absence claim of the form "and NOTHING else",
+ * enforced as set EQUALITY against a pinned set.
+ *
+ * Equality, not subset, is also the vacuity guard: an extractor that silently
+ * returns nothing fails against a non-empty pinned set, so a broken extractor
+ * shows up as RED rather than as a permanent, meaningless green.
+ */
+const SETS = {
+  docsTriggers: { allowed: ["push", "workflow_dispatch"] },
+  ciTriggers: { allowed: ["pull_request"] },
+  ciPermissions: { allowed: ["contents: read"] },
+  ciUses: { allowed: ["actions/checkout@v4", "actions/setup-node@v4"] },
+  ciRun: { allowed: ["npm ci", "npm run build", "npm test"] },
+};
+
+const sorted = (xs) => [...xs].sort();
+const matchesPin = (key, found) =>
+  found !== null &&
+  JSON.stringify(sorted(found)) === JSON.stringify(sorted(SETS[key].allowed));
+
+/** Assert an extracted set is EXACTLY the pinned set, and record the use. */
+function confinedTo(key, found, message) {
+  EXERCISED.absent.add(key);
+  assert.ok(found !== null, `${message} (the block the claim is about is not there at all)`);
+  assert.deepEqual(sorted(found), sorted(SETS[key].allowed), message);
+}
+
+/**
+ * The positive control: over text that DOES contain the forbidden thing, the
+ * same extractor and the same pinned set must FIRE. Null counts as firing,
+ * which is what makes `permissions: write-all` a caught defect.
+ */
+function fires(key, found, message) {
+  EXERCISED.present.add(key);
+  assert.ok(!matchesPin(key, found), message);
 }
 
 test("control: comment stripping keeps the executable YAML and only that", async () => {
@@ -298,6 +425,161 @@ test("site-ci.yml gates a pull request into ANY base branch", async () => {
   );
 });
 
+test("docs.yml is triggered by push and workflow_dispatch and by NOTHING else", async () => {
+  // S1. docs.yml's header says "Do not 'improve' this into a tag or release
+  // trigger", and `tagTrigger` enforces only the `tags:` half. `release:` and
+  // `create:` were both planted and both deployed green. The claim is a
+  // "nothing else", so the trigger SET is what gets pinned.
+  const yml = code(await read(DOCS));
+  const on = onBlock(yml);
+  assert.ok(on !== null, "docs.yml has no top-level `on:` block — the S1 claim has no subject");
+
+  // POSITIVE CONTROLS, one per trigger the header names, planted into the
+  // STRIPPED text and checked for having landed.
+  for (const [needle, block] of [
+    ["release:", "  release:\n    types: [published]"],
+    ["create:", "  create: {}"],
+  ]) {
+    const planted_ = planted(yml.replace(/^on:$/m, `on:\n${block}`), needle, "docs.yml, stripped");
+    fires(
+      "docsTriggers",
+      blockKeys(onBlock(planted_)),
+      `control failed: the trigger pin does not see a \`${needle}\` trigger`,
+    );
+  }
+
+  confinedTo(
+    "docsTriggers",
+    blockKeys(on),
+    "docs.yml's trigger list is not exactly [push, workflow_dispatch]. The header explains " +
+      "why this deploy is not tag- or release-triggered: the `github-pages` environment " +
+      "rejects `v*` refs, so such a deploy fires at release time and dies at the gate",
+  );
+});
+
+test("site-ci.yml is triggered by pull_request and by NOTHING else", async () => {
+  const yml = code(await read(SITE_CI));
+  const on = onBlock(yml);
+  assert.ok(on !== null, "site-ci.yml has no top-level `on:` block");
+
+  const planted_ = planted(
+    yml.replace(/^on:$/m, "on:\n  push:\n    branches: [main]"),
+    "push:",
+    "site-ci.yml, stripped",
+  );
+  fires(
+    "ciTriggers",
+    blockKeys(onBlock(planted_)),
+    "control failed: the trigger pin does not see an added `push:` trigger",
+  );
+
+  confinedTo(
+    "ciTriggers",
+    blockKeys(on),
+    "site-ci.yml's trigger list is not exactly [pull_request]. It is the pull-request gate " +
+      "and it does not deploy; a second trigger here runs it somewhere its `paths:` filter " +
+      "was never reasoned about",
+  );
+});
+
+test("site-ci.yml holds exactly one permission, in any spelling", async () => {
+  // R5, widened. `pagesPermission` matches the literal `pages: write`, and
+  // `pages: 'write'` — the same grant, quoted — was measured walking straight
+  // past it, as was `pages: read`. Pinning the permission SET closes every
+  // spelling at once, including `permissions: write-all`, which removes the
+  // `permissions:` block entirely and so has no key for a matcher to find.
+  const ci = code(await read(SITE_CI));
+
+  for (const [needle, line] of [
+    ["pages: 'write'", "  pages: 'write'"],
+    ["pages: read", "  pages: read"],
+    ["pages:   write", "  pages:   write"],
+  ]) {
+    const planted_ = planted(
+      ci.replace(/^(permissions:\n)/m, `$1${line}\n`),
+      needle,
+      "site-ci.yml, stripped",
+    );
+    fires(
+      "ciPermissions",
+      permissionEntries(planted_),
+      `control failed: the permission pin does not see \`${needle}\``,
+    );
+  }
+
+  // `write-all` is the null case: there is no block left to read.
+  const wideOpen = planted(
+    ci.replace(/^permissions:\n(?:[ \t]+.*\n)+/m, "permissions: write-all\n"),
+    "permissions: write-all",
+    "site-ci.yml, stripped",
+  );
+  assert.equal(
+    topBlock(wideOpen, "permissions"),
+    null,
+    "control failed: `permissions: write-all` was expected to leave no permissions BLOCK",
+  );
+  fires(
+    "ciPermissions",
+    permissionEntries(wideOpen),
+    "control failed: the permission pin accepted `permissions: write-all`",
+  );
+
+  confinedTo(
+    "ciPermissions",
+    permissionEntries(ci),
+    "site-ci.yml grants a permission other than `contents: read`. It builds and tests and " +
+      "does not deploy; any write grant here is what a Pages deployment would need",
+  );
+});
+
+test("site-ci.yml runs exactly the actions and commands a build-and-test job needs", async () => {
+  // S7. site-ci.yml's header claims "the absence of EVERY Pages deployment
+  // action". `deployAction` names the three `actions/*` ones, so three
+  // third-party deploys were measured landing green — two actions and one
+  // plain shell command, which no `uses:` matcher can see at all. Pinning both
+  // sets closes the class rather than the three instances.
+  const ci = code(await read(SITE_CI));
+  const STEP = /^([ \t]+)- name: Check out repository$/m;
+  assert.match(ci, STEP, "site-ci.yml has no checkout step to plant a deploy in front of");
+
+  for (const deploy of [
+    "uses: peaceiris/actions-gh-pages@v3",
+    "uses: JamesIves/github-pages-deploy-action@v4",
+  ]) {
+    const planted_ = planted(
+      ci.replace(STEP, `$1- ${deploy}\n$1- name: Check out repository`),
+      deploy,
+      "site-ci.yml, stripped",
+    );
+    fires("ciUses", usesValues(planted_), `control failed: the action pin does not see \`${deploy}\``);
+  }
+
+  // The one that is not an action at all, and so is invisible to `uses:`.
+  const shellDeploy = planted(
+    ci.replace(STEP, "$1- run: npx gh-pages -d dist\n$1- name: Check out repository"),
+    "run: npx gh-pages -d dist",
+    "site-ci.yml, stripped",
+  );
+  fires(
+    "ciRun",
+    runValues(shellDeploy),
+    "control failed: the command pin does not see a deploy run as a shell command",
+  );
+
+  confinedTo(
+    "ciUses",
+    usesValues(ci),
+    "site-ci.yml uses an action other than checkout and setup-node. It must not be able to " +
+      "deploy; deployment is docs.yml, on main",
+  );
+  confinedTo(
+    "ciRun",
+    runValues(ci),
+    "site-ci.yml runs a command other than `npm ci`, `npm run build` and `npm test`. A deploy " +
+      "does not need to be an action — `npx gh-pages -d dist` is a deploy",
+  );
+});
+
 test("the register's pairing row is true: no absence assertion stands alone", () => {
   // FIX-2, the durable half. The row above claims every absence assertion is
   // paired with a positive control. It was FALSE — `continue-on-error` had
@@ -322,8 +604,35 @@ test("the register's pairing row is true: no absence assertion stands alone", ()
   // The register row names matchers as the unit of pairing, so every matcher in
   // the table must be exercised at all — one that is never used is a claim the
   // file appears to make and does not.
-  const unused = Object.keys(M)
+  //
+  // The whitelist rows in `SETS` are adjudicated by the same two checks and for
+  // the same reason. A pinned set asserted over a file with no control is the
+  // identical failure: an extractor that returns nothing and a file that is
+  // genuinely clean produce the same green, and "and NOTHING else" is still an
+  // absence claim however it is spelled.
+  const unused = [...Object.keys(M), ...Object.keys(SETS)]
     .filter((k) => !EXERCISED.absent.has(k) && !EXERCISED.present.has(k))
     .sort();
   assert.deepEqual(unused, [], `matchers defined but never exercised: ${unused.join(", ")}`);
+
+  // AND THE MIRROR, for the whitelist rows only. The check above catches an
+  // absence assertion with no control. It does NOT catch the reverse — a row
+  // that is declared in `SETS`, fully positively controlled, and never actually
+  // asserted against the real file. That green is the same lie as R6's,
+  // photographed from the other side: the register names the row, the controls
+  // prove the extractor works, and nothing anywhere checks the shipped file.
+  // Deleting one `confinedTo` call was measured leaving the suite at 55/55.
+  //
+  // This is asserted for `SETS` and not for `M` because every `SETS` row is an
+  // absence claim by construction — "and NOTHING else" — whereas a matcher may
+  // legitimately exist only to assert that something IS present.
+  const unenforced = Object.keys(SETS)
+    .filter((k) => !EXERCISED.absent.has(k))
+    .sort();
+  assert.deepEqual(
+    unenforced,
+    [],
+    `these whitelist rows are declared and controlled but never asserted against the shipped ` +
+      `file: ${unenforced.join(", ")}. The register claims them; nothing enforces them.`,
+  );
 });
