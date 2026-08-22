@@ -128,7 +128,17 @@ test("no built page claims runtime support for an agent product", async () => {
 // likely to type by hand was the one spelling the gate could not see. Found by
 // planting `Requires v9.9.9 or later.` on the landing page and watching the
 // gate stay green.
-const VERSION_LITERAL = /(?<![\w.])v?\d+\.\d+\.\d+(?![\w.])/;
+//
+// The trailing lookahead is `(?!\.?\d)`, not `(?![\w.])`, and that is the same
+// lesson one layer along. `(?![\w.])` was written to mean "not part of a longer
+// dotted number", but what it says is "not followed by punctuation" — so it
+// also refused `Current release: v1.3.0.`, a version ending a sentence. That is
+// not a hypothetical spelling: `v1.3.0` is this repository's current tag and
+// the exact value of `var Version = "1.3.0"` in cmd/root.go, i.e. the one
+// string this gate exists to catch. `(?!\.?\d)` expresses the actual intent —
+// reject `1.2.3.4`, accept a version followed by anything that is not another
+// dotted component.
+const VERSION_LITERAL = /(?<![\w.])v?\d+\.\d+\.\d+(?!\.?\d)/;
 
 /**
  * The population: every site-authored file whose content can reach a rendered
@@ -157,11 +167,32 @@ async function siteSourceFiles() {
 
 test("controls: the version-literal matcher fires on a planted version", () => {
   // Both spellings, because both are things a person types.
+  //
+  // ONE CONTROL PER FOLLOWER CLASS, and the classes come from ENUMERATING what
+  // can follow a version literal — not from the last bug. The four original
+  // strings all put the version before a space or a quote, which is why they
+  // could certify a matcher that was blind to `v1.3.0.` and to `v1.3.0beta`
+  // alike: a control set written in the shape of the previous defect tests the
+  // instrument only for that shape.
+  //
+  // The enumeration ran every printable-ASCII character (plus newline, tab and
+  // the non-ASCII punctuation these docs use) as the follower of `v1.3.0` and
+  // of `1.3.0`, 234 probes, and the `(?![\w.])` matcher was silent on 126 of
+  // them. Those 126 are two classes, and one control below stands for each:
+  // a `.` not followed by a digit, and a word character. The remaining strings
+  // hold the classes that already worked, so a future edit cannot lose them.
   for (const s of [
-    'const version = "1.3.0";',
-    "Requires v9.9.9 or later.",
-    "agentskills 1.2.1 adds a scan flag",
-    "install v1.0.0 from the releases page",
+    'const version = "1.3.0";',                 // followed by a quote
+    "Requires v9.9.9 or later.",                // followed by a space
+    "agentskills 1.2.1 adds a scan flag",       // followed by a space, bare
+    "install v1.0.0 from the releases page",    // followed by a space, v-prefixed
+    "Install agentskills v1.3.0.",              // `.` — SENTENCE PERIOD, v-prefixed
+    "The fallback constant is 1.3.0.",          // `.` — SENTENCE PERIOD, bare
+    "Upgrade notes live in v1.3.0.md",          // `.` then a letter, not a digit
+    "Pre-release v1.3.0beta was never shipped", // WORD CHARACTER follower
+    "Tagged v1.3.0, built from main.",          // comma
+    "Latest release v1.3.0",                    // end of input
+    "Latest release v1.3.0\nSee the releases page.", // end of LINE
   ]) {
     assert.ok(VERSION_LITERAL.test(s), `matcher missed a planted version literal: ${JSON.stringify(s)}`);
   }
@@ -169,6 +200,14 @@ test("controls: the version-literal matcher fires on a planted version", () => {
     "the CLI version comes from the Releases API",
     "see section 7.4 of the proposal",
     "an IPv4 address like 10.0.0.1 is not a version", // four parts, not three
+    "the build number is 1.2.3.4 today",              // four parts, mid-sentence
+    "10.0.0.1.",                                      // four parts, sentence period
+    // BACKTRACK BAIT, and the reason the lookahead is `(?!\.?\d)` rather than
+    // the more obvious `(?!\.\d)`: under the obvious form the matcher gives up
+    // the whole third component and settles for `1.2.34` inside `1.2.345.6`,
+    // reporting a version literal inside a number that has four components.
+    "1.2.345.6 is not a version either",
+    "192.168.100.7 is a host, not a release",         // same trap, IPv4 spelling
   ]) {
     assert.ok(!VERSION_LITERAL.test(s), `matcher fired on clean text: ${JSON.stringify(s)}`);
   }
