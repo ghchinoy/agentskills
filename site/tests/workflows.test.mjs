@@ -283,12 +283,18 @@ test("site-ci.yml gates a pull request into ANY base branch", async () => {
     present("branchFilter", filtered, `control failed: the branch-filter matcher does not see \`${key}:\``);
   }
 
+  // The message names the filter it found. `branches:` and `branches-ignore:`
+  // are different defects, and a shared message would make the two
+  // indistinguishable in a seeded-failure run — which is the same
+  // unattributable-control problem this round is fixing elsewhere.
+  const filter = M.branchFilter.exec(on);
   absent(
     "branchFilter",
     on,
-    "site-ci.yml's pull_request trigger is filtered by base branch. That is a DELIBERATE " +
-      "absence (see the comment at the trigger): a pull request into a working branch must " +
-      "be gated too, and a base-branch filter stops gating them silently.",
+    `site-ci.yml's pull_request trigger is filtered by base branch — it carries ` +
+      `${JSON.stringify((filter?.[0] ?? "").trim())}. That is a DELIBERATE absence (see the ` +
+      `comment at the trigger): a pull request into a working branch must be gated too, and ` +
+      `a base-branch filter stops gating them silently.`,
   );
 });
 
