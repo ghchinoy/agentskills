@@ -278,18 +278,136 @@ function trackedMarkdown() {
     .toString().trim().split("\n").filter(Boolean);
 }
 
+/** Every directory that actually exists in the repository, derived from git. */
+function realDirectories() {
+  const dirs = new Set();
+  for (const f of execFileSync("git", ["ls-files"], { cwd: repoRoot }).toString().trim().split("\n")) {
+    const parts = f.split("/");
+    for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
+  }
+  return dirs;
+}
+
+/** The rendered <p> elements, so a claim can be scoped to its own paragraph. */
+function paragraphs(body) {
+  return [...body.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map((m) => ({
+    html: m[1],
+    text: toText(m[1]).replace(/\s+/g, " ").trim(),
+  }));
+}
+
+/**
+ * Every place a passage says the deferred documents ARE.
+ *
+ * KEYED TO THE CLAIM, NOT TO LINK SYNTAX. An earlier version read only
+ * `tree/` hrefs, so the identical falsehood written as plain prose — "they all
+ * remain in the docs/ directory" — sailed through green, and a `blob/` URL
+ * evaded it the same way. Both forms are read here, and the prose side is
+ * anchored to directories that REALLY EXIST in this repository so that ordinary
+ * words are not mistaken for locations.
+ */
+export function locativeClaims(passage, realDirs) {
+  // Keyed by dir so the same place claimed twice is one claim, but the FORM is
+  // carried through: a link and a prose mention are different defects to fix
+  // and must not produce the same failure message.
+  const out = new Map();
+  for (const m of passage.html.matchAll(
+    /href="https:\/\/github\.com\/[^/"]+\/[^/"]+\/(?:tree|blob)\/[^/"]+\/([^"]*)"/g,
+  )) {
+    const p = decodeURIComponent(m[1]).replace(/\/+$/, "");
+    if (p && !out.has(p)) out.set(p, { dir: p, via: "a repository link" });
+  }
+  for (const m of passage.text.matchAll(/(?:^|[\s(`"'])([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*)\/(?=[\s,.;:)`"']|$)/g)) {
+    if (realDirs.has(m[1]) && !out.has(m[1])) out.set(m[1], { dir: m[1], via: "prose naming a real directory" });
+  }
+  return [...out.values()];
+}
+
+/** Which deferred documents a claimed location fails to contain. */
+export const notInside = (dir, keys) => keys.filter((k) => k !== dir && !k.startsWith(`${dir}/`));
+
+test("controls: the locative predicate fires, in prose and in links alike", () => {
+  // MEASURED, AND THE REASON THIS CONTROL EXISTS: at the current head the live
+  // claim names no directory at all, so the loop in the gate below iterates
+  // ZERO times. A verdict of "nothing wrong" over an empty set is not evidence,
+  // and without this the locative check would be labelled as the defect that
+  // shipped while contributing nothing. Here the predicate is exercised
+  // directly, on the shapes the real defect took.
+  const dirs = new Set(["docs", "skills", "skills/agentskills"]);
+  const keys = ["README.md", "docs/development.md", "skills/agentskills/SKILL.md"];
+
+  // The shipped defect, as a LINK — what the old sentence actually was.
+  assert.deepEqual(
+    locativeClaims({ html: 'in <a href="https://github.com/ghchinoy/agentskills/tree/main/docs">docs/</a>', text: "" }, dirs)
+      .map((c) => c.dir),
+    ["docs"],
+    "the locative predicate missed a tree link",
+  );
+  // The same defect as PLAIN PROSE, which the previous version passed green.
+  assert.deepEqual(
+    locativeClaims({ html: "", text: "they all remain in the docs/ directory on GitHub." }, dirs)
+      .map((c) => c.dir),
+    ["docs"],
+    "the locative predicate missed a prose directory claim",
+  );
+  // And as a blob URL, which also evaded the link-syntax version.
+  assert.deepEqual(
+    locativeClaims({ html: 'see <a href="https://github.com/o/r/blob/main/docs">here</a>', text: "" }, dirs)
+      .map((c) => c.dir),
+    ["docs"],
+    "the locative predicate missed a blob link",
+  );
+  // Ordinary prose naming no real directory must NOT be read as a location,
+  // or every sentence becomes a locative claim.
+  assert.deepEqual(
+    locativeClaims({ html: "", text: "the CLI's release archive and/or its docs." }, dirs),
+    [],
+    "the locative predicate invented a location out of ordinary prose",
+  );
+
+  // …and the verdict half really convicts, rather than returning [] always.
+  assert.deepEqual(notInside("docs", keys), ["README.md", "skills/agentskills/SKILL.md"]);
+  assert.deepEqual(notInside("", ["README.md"]).length, 1);
+
+  // THE SCOPING PROPERTY, kept as a regression control because losing it is not
+  // visible from the live page. A correct claim, plus an unrelated link
+  // ELSEWHERE on the page: reading the whole body convicts the correct page,
+  // reading the claim's own paragraph does not. This is the reviewer's
+  // experiment — a correct page must not fail — made permanent.
+  const wholeBody =
+    '<p>Only the User\'s Guide is published here so far. They remain in the ' +
+    '<a href="https://github.com/ghchinoy/agentskills">repository</a> on GitHub, deferred.</p>' +
+    '<p>See the <a href="https://github.com/ghchinoy/agentskills/tree/main/skills">skills directory</a>.</p>';
+  const claimPara = paragraphs(wholeBody).find((p) => /\bdeferred\b/i.test(p.text));
+  assert.ok(claimPara, "the control's own fixture has no deferral paragraph");
+  assert.deepEqual(
+    locativeClaims(claimPara, dirs),
+    [],
+    "a correct deferral claim was convicted by a link that is not part of it",
+  );
+  assert.deepEqual(
+    locativeClaims({ html: wholeBody, text: toText(wholeBody).replace(/\s+/g, " ") }, dirs).map((c) => c.dir),
+    ["skills"],
+    "the control cannot show the difference scoping makes: the unrelated link is invisible even unscoped",
+  );
+});
+
 test("FIX-4: the landing page's deferral claim is true, and scoped to what the register covers", async () => {
   const html = await readDist("index.html");
   const body = innerHtml(html, '<div class="sl-markdown-content"');
   assert.ok(body, "landing page has no rendered markdown region");
   const text = toText(body).replace(/\s+/g, " ");
 
-  // VACUITY. Everything below ranges over this sentence, so if it is gone the
-  // whole test would pass by having nothing to judge. Delete the claim and this
-  // is what fails.
-  const claim = /[^.]*\bdeferred\b[^.]*\./i.exec(text);
-  assert.ok(claim, "the landing page no longer makes any deferral claim; this gate has nothing to check");
-  const sentence = claim[0];
+  // VACUITY. Everything below ranges over this passage, so if it is gone the
+  // whole test would pass by having nothing to judge.
+  //
+  // The paragraph is located on "deferred" OR "not published": keying it to
+  // "deferred" alone meant the ORIGINAL false sentence — which never used that
+  // word — failed here at the vacuity guard instead of at the locative check
+  // built for it. The founding defect must reach the assertion written for it.
+  const para = paragraphs(body).find((p) => /\bdeferred\b|\bnot published\b/i.test(p.text));
+  assert.ok(para, "the landing page no longer makes any deferral claim; this gate has nothing to check");
+  const sentence = para.text;
 
   // 1. THE COUNT. Spelled on the page, derived from the register here. Publish
   //    a sixth page or defer a sixth document and the page's number goes stale.
@@ -301,19 +419,22 @@ test("FIX-4: the landing page's deferral claim is true, and scoped to what the r
     `the landing page says ${counted[1]} deferred documents; the register holds ${Object.keys(DEFERRED).length}`,
   );
 
-  // 2. THE LOCATIVE HALF — the defect that shipped. Any repository path the
-  //    sentence points at must actually contain EVERY deferred document. The
-  //    old sentence named docs/, which holds three of the five.
-  const links = [...body.matchAll(/href="https:\/\/github\.com\/[^/]+\/[^/]+\/tree\/[^/]+\/([^"]*)"/g)]
-    .map((m) => decodeURIComponent(m[1]).replace(/\/$/, ""))
-    .filter((p) => p && sentence.includes("deferred"));
-  for (const dir of links) {
-    const outside = Object.keys(DEFERRED).filter((k) => !k.startsWith(`${dir}/`));
+  // 2. THE LOCATIVE HALF — the defect that shipped. Any location the claim
+  //    names must actually contain EVERY deferred document. The old sentence
+  //    named docs/, which holds three of the five.
+  //
+  //    SCOPED TO THE PARAGRAPH, not to the page. Reading hrefs out of the whole
+  //    body meant any unrelated link elsewhere on the landing page was judged as
+  //    though the deferral claim had pointed at it — a CORRECT page failed. The
+  //    guard that was supposed to scope it (`sentence.includes("deferred")`) was
+  //    a constant true, because the passage is selected by requiring that word.
+  const deferredKeys = Object.keys(DEFERRED);
+  for (const { dir, via } of locativeClaims(para, realDirectories())) {
     assert.deepEqual(
-      outside,
+      notInside(dir, deferredKeys),
       [],
-      `the landing page locates the deferred documents in ${JSON.stringify(dir)}, ` +
-        `but these are not inside it: ${outside.join(", ")}`,
+      `the landing page locates the deferred documents in ${JSON.stringify(dir)} ` +
+        `(via ${via}), but these are not inside it: ${notInside(dir, deferredKeys).join(", ")}`,
     );
   }
 

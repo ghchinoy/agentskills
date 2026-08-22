@@ -497,17 +497,49 @@ const TWO_COMPONENT = /(?<!\d)(?<!\d\.)v?\d+\.\d+(?!\.?\d)/;
  * So a bad lift returns null and the caller refuses to run. The one thing this
  * must never do is return something scannable-but-wrong.
  */
-const CLI_NAME_SHAPE = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
+const CLI_NAME_SHAPE = /^[a-z0-9](?:[a-z0-9._~-]*[a-z0-9])?$/;
+
+/** Go's major-version suffix: the final element is `vN` for N >= 2. */
+const MAJOR_VERSION_SUFFIX = /^v(\d+)$/;
 
 export function declaredCliName(gomod) {
   const m = /^module[ \t]+(\S+)[ \t]*$/m.exec(String(gomod ?? ""));
   if (!m) return null;
-  // The RAW last segment. Do NOT drop empty segments first: on a path ending in
-  // a slash that silently promotes the PARENT segment, so `github.com/ghchinoy/`
-  // would yield `ghchinoy` — a perfectly scannable name that is not the tool's.
-  // Wrong-but-plausible is the one outcome this function must never produce.
-  const last = m[1].split("/").pop();
+  const segments = m[1].split("/");
+
+  // SPEC: a module path has no empty elements and may not begin or end with a
+  // slash. Rejecting that HERE is what stops the parent-segment promotion —
+  // `github.com/ghchinoy/` must not quietly become `ghchinoy`.
+  if (segments.some((s) => s === "")) return null;
+
+  // SPEC: from major version 2 onward the module path ENDS IN `/vN`. The
+  // version is not the name, so `.../agentskills/v2` is still `agentskills`.
+  // v0 and v1 take no suffix, so a final `v1` is a genuine element and is left
+  // alone. This is the form the module will actually take the day it bumps —
+  // far likelier than any malformation — and it yields a VALID-SHAPED wrong
+  // name, which is precisely the outcome this function exists to prevent.
+  const tail = segments[segments.length - 1];
+  const major = MAJOR_VERSION_SUFFIX.exec(tail);
+  if (major && Number(major[1]) >= 2 && segments.length > 1) segments.pop();
+
+  let last = segments.pop();
   if (!last) return null;
+
+  // A path that is NOTHING BUT a major-version suffix names no module. The
+  // guard above deliberately refuses to pop the only element, so this is where
+  // `module v2` is caught rather than returned as a valid-shaped name.
+  const bare = MAJOR_VERSION_SUFFIX.exec(last);
+  if (bare && Number(bare[1]) >= 2) return null;
+
+  // The gopkg.in convention carries the major version on the element itself
+  // (`gopkg.in/yaml.v3`). Host-gated, so a tool legitimately named `foo.v2`
+  // elsewhere is not mangled.
+  if (/^gopkg\.in$/i.test(segments[0] ?? "")) last = last.replace(/\.v\d+$/, "");
+
+  // A repository-URL artefact rather than a module-path form, but it reaches
+  // this function by the same route.
+  last = last.replace(/\.git$/i, "");
+
   const name = last.toLowerCase();
   return CLI_NAME_SHAPE.test(name) ? name : null;
 }
@@ -1198,6 +1230,12 @@ test("controls: a BAD LIFT of the CLI name fails loudly and never scans", async 
     ["  module github.com/ghchinoy/agentskills\n", "the directive is indented, so it is not a directive"],
     ["module github.com/ghchinoy/agent skills\n", "the path is split by whitespace"],
     ["module github.com/ghchinoy/{{.ProjectName}}\n", "the path is an untemplated placeholder"],
+    // Spec-derived: elements may not be empty, nor begin or end with a dot.
+    ["module github.com//agentskills\n", "an empty interior element"],
+    ["module /github.com/ghchinoy/agentskills\n", "the path begins with a slash"],
+    ["module github.com/ghchinoy/.agentskills\n", "the element begins with a dot"],
+    ["module github.com/ghchinoy/agentskills.\n", "the element ends with a dot"],
+    ["module v2\n", "the whole path is a major-version suffix and nothing else"],
   ];
   for (const [gomod, why] of BAD) {
     assert.equal(
@@ -1214,8 +1252,35 @@ test("controls: a BAD LIFT of the CLI name fails loudly and never scans", async 
 
   // …and the validator is not simply rejecting everything, which would pass the
   // loop above while disabling the gate permanently.
-  assert.equal(declaredCliName("module github.com/ghchinoy/agentskills\n"), "agentskills");
-  assert.equal(declaredCliName("module\tgithub.com/x/Tool-2\n"), "tool-2");
+  //
+  // THESE ARE DERIVED FROM THE MODULE-PATH SPECIFICATION, NOT IMAGINED.
+  // The first version of this probe set was built from malformations I thought
+  // up, and it therefore covered a trailing slash and an untemplated
+  // placeholder but MISSED `/v2` — not an exotic input but the Go major-version
+  // convention, and the likeliest real path after the plain one. Enumerating
+  // what the spec PERMITS finds the forms that guessing does not.
+  const GOOD = [
+    ["module github.com/ghchinoy/agentskills\n", "agentskills", "the plain form"],
+    ["module github.com/ghchinoy/agentskills/v2\n", "agentskills", "major-version suffix, the v2 bump"],
+    ["module github.com/ghchinoy/agentskills/v10\n", "agentskills", "major-version suffix, multi-digit"],
+    ["module github.com/ghchinoy/agentskills/v1\n", "v1", "v1 takes NO suffix, so a final v1 is a real element"],
+    ["module github.com/ghchinoy/tools/cmd/agentskills\n", "agentskills", "a submodule, deeper than three elements"],
+    ["module agentskills\n", "agentskills", "a single-element path, legal for a local module"],
+    ["module github.com/GhChinoy/AgentSkills\n", "agentskills", "case is permitted and folded"],
+    ["module github.com/x/agent-skills\n", "agent-skills", "hyphen, a permitted element character"],
+    ["module github.com/x/agent_skills\n", "agent_skills", "underscore, permitted"],
+    ["module github.com/x/agent.skills\n", "agent.skills", "an interior dot, permitted"],
+    ["module\tgithub.com/x/Tool-2\n", "tool-2", "a tab separates the directive from the path"],
+    ["module gopkg.in/yaml.v3\n", "yaml", "the gopkg.in convention carries the version on the element"],
+    ["module github.com/x/agentskills.git\n", "agentskills", "a repository-URL artefact"],
+  ];
+  for (const [gomod, expected, why] of GOOD) {
+    assert.equal(
+      declaredCliName(gomod),
+      expected,
+      `a LEGAL module path was lifted wrongly (${why}): ${JSON.stringify(gomod)}`,
+    );
+  }
 
   // SECOND WITNESS. .goreleaser.yaml declares the shipped binary's name
   // independently of go.mod. Compared, not trusted — and if the two ever
