@@ -220,12 +220,40 @@ const VERSION_LITERAL = /(?<!\d)(?<!\d\.)v?\d+\.\d+\.\d+(?!\.?\d)/;
 // number, does not attribute it and the gate reports. Reporting is the safe
 // direction, so that is where the doubt is sent.
 //
-// KNOWN AND ACCEPTED ESCAPE HATCH, recorded rather than hidden: a writer who
-// puts a third-party name in front of the CLI's own version — `Node 1.3.0` —
-// is excused. Using it means stating something false of a DIFFERENT kind, in a
-// sentence whose own subject contradicts its number. The alternative is the
-// status quo, in which six true statements are blocked and the gate gets
-// switched off by the first person who needs to make one of them.
+// THAT ESCAPE HATCH IS CLOSED, AND THIS PARAGRAPH USED TO SAY OTHERWISE.
+//
+// It read: "KNOWN AND ACCEPTED ESCAPE HATCH — a writer who puts a third-party
+// name in front of the CLI's own version, `Node 1.3.0`, is excused." That was
+// true of ADJACENCY-ONLY attribution, which is what this section describes. It
+// has been false since the pin check below was added: `node` is pinned at
+// 22.19.0, `1.3.0` is not that, so the excuse does not apply and the gate
+// reports. Control row G1 in GATE_CASES has asserted the closed behaviour for
+// just as long, roughly 650 lines below this comment, and the two disagreed.
+//
+// FIX-4 measured it rather than reading it: `Node 1.3.0` planted into the
+// population fires the gate. A stale comment that UNDERSTATES a gate is not
+// harmless — it invites the next editor to simplify away a pin check on the
+// grounds that the hole it closes is documented as open anyway.
+//
+// THE HATCH THAT IS ACTUALLY LEFT is narrower, and it is STRUCTURAL rather
+// than a thing anyone forgot to write. It is a literal that is BOTH a named
+// subject's real pin AND the CLI's own version. FIX-4 measured it: with
+// `sharp` moved to `1.3.0` in package.json, the sentence
+// `Image handling comes from sharp 1.3.0.` is excused, and a hand-typed CLI
+// version hides inside a statement that is simultaneously true of sharp.
+//
+// It is latent today — no dependency is pinned at the CLI's version — and it
+// is NOT FIXED HERE, for a reason worth writing down rather than leaving as an
+// omission. This gate cannot know the CLI's version. Proposal §7.4 requires
+// that version to be DERIVED from the Releases API and never typed, which is
+// the property this whole file exists to enforce, so there is no local
+// constant to compare a literal against. A gate that could recognise the
+// coincidence would have to hard-code the very literal it forbids.
+//
+// Nor can the ambiguity be resolved by reporting instead of excusing: when the
+// two versions coincide the SENTENCE IS GENUINELY AMBIGUOUS, and reporting it
+// would block a true statement about a dependency — reopening precisely the
+// false-fire class that the attribution rule above was built to close.
 
 // ── THE SUBJECT SET IS THE ENTIRE EXCUSE SURFACE, SO IT IS LIFTED ───────────
 //
