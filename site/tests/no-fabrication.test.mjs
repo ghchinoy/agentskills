@@ -503,7 +503,13 @@ const CLI_NAME_SHAPE = /^[a-z0-9](?:[a-z0-9._~-]*[a-z0-9])?$/;
 const MAJOR_VERSION_SUFFIX = /^v(\d+)$/;
 
 export function declaredCliName(gomod) {
-  const m = /^module[ \t]+(\S+)[ \t]*$/m.exec(String(gomod ?? ""));
+  // Leading whitespace is PERMITTED before the directive. Measured, not
+  // assumed: a go.mod whose first line is "  module github.com/ghchinoy/
+  // agentskills" is read by `go mod edit -json` as Path
+  // "github.com/ghchinoy/agentskills". An earlier version of this anchored at
+  // column 0 and rejected that file — refusing a legal go.mod, which stops the
+  // gate dead on a repository that is perfectly correct.
+  const m = /^[ \t]*module[ \t]+(\S+)[ \t]*$/m.exec(String(gomod ?? ""));
   if (!m) return null;
   const segments = m[1].split("/");
 
@@ -514,10 +520,18 @@ export function declaredCliName(gomod) {
 
   // SPEC: from major version 2 onward the module path ENDS IN `/vN`. The
   // version is not the name, so `.../agentskills/v2` is still `agentskills`.
-  // v0 and v1 take no suffix, so a final `v1` is a genuine element and is left
-  // alone. This is the form the module will actually take the day it bumps —
-  // far likelier than any malformation — and it yields a VALID-SHAPED wrong
-  // name, which is precisely the outcome this function exists to prevent.
+  // This is the form the module will actually take the day it bumps — far
+  // likelier than any malformation — and it yields a VALID-SHAPED wrong name,
+  // which is precisely the outcome this function exists to prevent.
+  //
+  // `/v0` and `/v1` are NOT the same case and must not be treated as one. The
+  // toolchain REFUSES them: `go mod init example.com/x/agentskills/v1` exits 1
+  // with "major version suffixes must be in the form of /vN and are only
+  // allowed for v2 or later". So a path ending `/v1` is not a legal module
+  // path at all, and there is no correct name to lift out of it. Returning
+  // `agentskills` would launder an illegal path into a plausible answer;
+  // returning `v1` would be the wrong-but-plausible output this whole function
+  // exists to prevent. It fails loudly instead.
   const tail = segments[segments.length - 1];
   const major = MAJOR_VERSION_SUFFIX.exec(tail);
   if (major && Number(major[1]) >= 2 && segments.length > 1) segments.pop();
@@ -525,11 +539,24 @@ export function declaredCliName(gomod) {
   let last = segments.pop();
   if (!last) return null;
 
-  // A path that is NOTHING BUT a major-version suffix names no module. The
-  // guard above deliberately refuses to pop the only element, so this is where
-  // `module v2` is caught rather than returned as a valid-shaped name.
-  const bare = MAJOR_VERSION_SUFFIX.exec(last);
-  if (bare && Number(bare[1]) >= 2) return null;
+  // Whatever `vN` is left is not a name. Two different inputs land here and
+  // both must fail loudly:
+  //
+  //   `.../agentskills/v1` — the pop above deliberately did not fire, because
+  //   /v0 and /v1 are NOT legal major-version suffixes. Measured: `go mod init
+  //   example.com/x/agentskills/v1` exits 1, "major version suffixes must be
+  //   in the form of /vN and are only allowed for v2 or later". The path is
+  //   illegal, so there is no correct name in it. Stripping the suffix anyway
+  //   would launder an illegal path into a plausible answer; returning "v1"
+  //   would be the wrong-but-plausible output this function exists to prevent.
+  //
+  //   `module v2` — a bare suffix and nothing else. `go mod init v2` SUCCEEDS,
+  //   so this one is legal and merely useless. Refusing it is policy, not a
+  //   claim that the path is malformed.
+  //
+  // ONE CHECK COVERS BOTH, and it must stay unconditional: narrowing it to
+  // N >= 2 puts the /v1 case back, which is plant FIX6-kk.
+  if (MAJOR_VERSION_SUFFIX.test(last)) return null;
 
   // The gopkg.in convention carries the major version on the element itself
   // (`gopkg.in/yaml.v3`). Host-gated, so a tool legitimately named `foo.v2`
@@ -1227,15 +1254,27 @@ test("controls: a BAD LIFT of the CLI name fails loudly and never scans", async 
     ["# module github.com/ghchinoy/agentskills\n", "the module line is commented out"],
     ["module\n", "the directive has no path"],
     ["module github.com/ghchinoy/\n", "the module path ends in a slash"],
-    ["  module github.com/ghchinoy/agentskills\n", "the directive is indented, so it is not a directive"],
     ["module github.com/ghchinoy/agent skills\n", "the path is split by whitespace"],
     ["module github.com/ghchinoy/{{.ProjectName}}\n", "the path is an untemplated placeholder"],
-    // Spec-derived: elements may not be empty, nor begin or end with a dot.
+    // Spec-derived AND toolchain-confirmed: `go mod init` rejects each of these
+    // (double slash / empty path element / trailing dot in path element).
     ["module github.com//agentskills\n", "an empty interior element"],
     ["module /github.com/ghchinoy/agentskills\n", "the path begins with a slash"],
-    ["module github.com/ghchinoy/.agentskills\n", "the element begins with a dot"],
     ["module github.com/ghchinoy/agentskills.\n", "the element ends with a dot"],
-    ["module v2\n", "the whole path is a major-version suffix and nothing else"],
+    // The toolchain rejects BOTH of these outright: a major-version suffix is
+    // legal only for v2 and later, so there is no name to lift.
+    ["module github.com/ghchinoy/agentskills/v1\n", "a /v1 suffix, which Go refuses"],
+    ["module github.com/ghchinoy/agentskills/v0\n", "a /v0 suffix, which Go refuses"],
+    // THESE TWO ARE LEGAL MODULE PATHS AND ARE REFUSED ANYWAY — a POLICY
+    // rejection, not a malformation, and labelled as such so this probe set
+    // does not assert something false about the specification.
+    //   `go mod init github.com/ghchinoy/.agentskills` -> rc=0. Go permits a
+    //   LEADING dot in a path element (only a trailing one is malformed). It is
+    //   refused here because it is not a plausible binary-name token, and
+    //   refusing fails loudly where scanning would fail silently.
+    ["module github.com/ghchinoy/.agentskills\n", "a leading dot: legal for Go, not a plausible binary name"],
+    //   `go mod init v2` -> rc=0. Legal, and useless: no tool name is in it.
+    ["module v2\n", "the whole path is a major-version suffix: legal, but names no tool"],
   ];
   for (const [gomod, why] of BAD) {
     assert.equal(
@@ -1253,17 +1292,27 @@ test("controls: a BAD LIFT of the CLI name fails loudly and never scans", async 
   // …and the validator is not simply rejecting everything, which would pass the
   // loop above while disabling the gate permanently.
   //
-  // THESE ARE DERIVED FROM THE MODULE-PATH SPECIFICATION, NOT IMAGINED.
+  // THESE ARE DERIVED FROM THE MODULE-PATH SPECIFICATION, NOT IMAGINED, AND
+  // THEN CHECKED AGAINST THE TOOLCHAIN ITSELF.
+  //
   // The first version of this probe set was built from malformations I thought
   // up, and it therefore covered a trailing slash and an untemplated
   // placeholder but MISSED `/v2` — not an exotic input but the Go major-version
   // convention, and the likeliest real path after the plain one. Enumerating
   // what the spec PERMITS finds the forms that guessing does not.
+  //
+  // AND THEN THE SPEC-DERIVED SET WAS ITSELF WRONG IN THREE PLACES, because it
+  // encoded MY READING of the specification. Running every probe through
+  // `go mod init` settled it: `/v1` and `/v0` are refused by Go (this set had
+  // `/v1` as a GOOD lift returning "v1" — the wrong-but-plausible output, the
+  // R1 defect reproduced inside the R1 fix), a LEADING dot in an element is
+  // ACCEPTED by Go (this set called it malformed), and a bare `v2` is a legal
+  // path (likewise). Deriving from a spec beats guessing; checking against the
+  // implementation beats both, and it is one command.
   const GOOD = [
     ["module github.com/ghchinoy/agentskills\n", "agentskills", "the plain form"],
     ["module github.com/ghchinoy/agentskills/v2\n", "agentskills", "major-version suffix, the v2 bump"],
     ["module github.com/ghchinoy/agentskills/v10\n", "agentskills", "major-version suffix, multi-digit"],
-    ["module github.com/ghchinoy/agentskills/v1\n", "v1", "v1 takes NO suffix, so a final v1 is a real element"],
     ["module github.com/ghchinoy/tools/cmd/agentskills\n", "agentskills", "a submodule, deeper than three elements"],
     ["module agentskills\n", "agentskills", "a single-element path, legal for a local module"],
     ["module github.com/GhChinoy/AgentSkills\n", "agentskills", "case is permitted and folded"],
@@ -1273,6 +1322,9 @@ test("controls: a BAD LIFT of the CLI name fails loudly and never scans", async 
     ["module\tgithub.com/x/Tool-2\n", "tool-2", "a tab separates the directive from the path"],
     ["module gopkg.in/yaml.v3\n", "yaml", "the gopkg.in convention carries the version on the element"],
     ["module github.com/x/agentskills.git\n", "agentskills", "a repository-URL artefact"],
+    // Toolchain-confirmed GOOD, and it was a BAD probe until the toolchain said
+    // otherwise: `go mod edit -json` reads an indented directive fine.
+    ["  module github.com/ghchinoy/agentskills\n", "agentskills", "leading whitespace before the directive, which Go permits"],
   ];
   for (const [gomod, expected, why] of GOOD) {
     assert.equal(
