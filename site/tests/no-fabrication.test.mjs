@@ -174,13 +174,13 @@ const VERSION_LITERAL = /(?<!\d)(?<!\d\.)v?\d+\.\d+\.\d+(?!\.?\d)/;
 //     Image handling comes from sharp 0.35.3.       dependency pin
 //     We conform to Semantic Versioning 2.0.0.      docs/releasing.md:8
 //
-// cert §2.8 listed a SIXTH, "Requires Go 1.24.0 or later to build.", sourced to
-// go.mod toolchain prose. No such string exists in this repository — the real
-// prose is `Go 1.22+` (docs/development.md:9) and `Go 1.22 or higher`
-// (docs/users_guide.md:10), both TWO-component and therefore invisible to a
-// matcher that requires three. cert withdrew the row on discovering it. It is
-// recorded here rather than quietly dropped, because a fabricated row inside
-// the finding about a fabrication gate is the most instructive thing in it.
+// cert §2.8 listed a SIXTH row, for Go, sourced to go.mod toolchain prose. The
+// sentence it quoted is not in this repository and neither is the version
+// literal it quoted; cert grepped for it, found nothing, and withdrew the row.
+// The real toolchain prose is TWO-component and therefore invisible to a
+// matcher that requires three, so Go was never a member of this class at all.
+// The invented literal is deliberately NOT reproduced here: quoting it in a
+// comment is how it survived long enough to become a carve-out.
 //
 // All five measured RED at 02221f55, planted one at a time into this gate's own
 // population. Today that population is clean, so the gate is green — but the
@@ -304,13 +304,13 @@ const ATTESTED_SUBJECTS = {
 //
 // `go` has no pin in package.json, so it was briefly exempted from the check
 // above and kept adjacency-only — which left `Go 1.3.0` excused. The stated
-// justification was that cert §2.8 required "Requires Go 1.24.0 or later to
-// build." to pass, and go.mod declares 1.26.4.
+// justification was a row in cert §2.8 requiring a Go sentence to keep passing.
 //
-// THAT SENTENCE IS NOT IN THIS REPOSITORY. cert grepped for it, found nothing,
-// and withdrew the row: the real toolchain prose is two-component (`Go 1.22+`)
-// and never reaches attribution at all. The exemption was justified by a
-// fabricated requirement, which is exactly the failure this file gates.
+// THAT SENTENCE IS NOT IN THIS REPOSITORY, and neither is the version it
+// quoted. cert grepped for it, found nothing, and withdrew the row: the real
+// toolchain prose is two-component and never reaches attribution at all. The
+// exemption was justified by a fabricated requirement, which is exactly the
+// failure this file gates.
 //
 // So `go` is pinned like everything else, from go.mod rather than package.json,
 // and PIN_EXEMPT IS EMPTY. It is kept — as an empty set with a live control —
@@ -408,6 +408,113 @@ function attributedToThirdParty(subjects) {
 }
 
 /**
+ * THE ONE ADJACENCY SCANNER. Every gate in this file that asks "does a named
+ * subject stand immediately to the left of this literal?" runs through here.
+ *
+ * There are TWO POLICIES over this one predicate, not two predicates:
+ *
+ *   - three-component literals: third-party-adjacent (and pin-equal) EXCUSES
+ *   - two-component literals:   CLI-name-adjacent REPORTS
+ *
+ * They differ ONLY in `shape`, `subjects` and `verdict`. The window arithmetic,
+ * the word-boundary guard and the per-match iteration are defined once, here,
+ * because two near-duplicate copies are two things that can drift — the next
+ * change updates one and not the other, and nothing compares them. A control
+ * below asserts that both callers still route through this function.
+ *
+ * Per-match, never per-line: each literal is judged against the window running
+ * from the END OF THE PREVIOUS MATCH to its own start, so a third-party version
+ * standing to the left cannot swallow a genuine CLI version to its right.
+ *
+ * @param {(hit: RegExpExecArray|null, literal: string) => boolean} opts.verdict
+ *        true to REPORT the literal, false to let it pass.
+ */
+function scanForAdjacency(line, { shape, subjects, verdict }) {
+  const attributed = attributedToThirdParty(subjects);
+  const scan = new RegExp(shape.source, "g");
+  const out = [];
+  let windowStart = 0;
+  for (const m of line.matchAll(scan)) {
+    const hit = attributed.exec(line.slice(windowStart, m.index));
+    windowStart = m.index + m[0].length;
+    if (verdict(hit, m[0])) out.push(m[0]);
+  }
+  return out;
+}
+
+// ── FIX-6: THE TRUNCATED SELF-REFERENCE ─────────────────────────────────────
+//
+// The shape component requires THREE components, so `agentskills 1.3` — a
+// truncated reference to the CLI's own version, the exact fabrication this file
+// exists to catch — passed in silence. cert found it; I confirmed it on the
+// shipped gate before building anything.
+//
+// WIDENING THE SHAPE TO TWO COMPONENTS IS NOT AVAILABLE, and this is measured
+// rather than argued. Two-component literals are ALL OVER the scanned surface:
+// I enumerated 23 of them using the gate's own file enumeration, and every one
+// is legitimate — proposal cross-references like §7.2, CSS values like 0.25rem,
+// SVG stroke widths, config comments. A two-component shape matcher reports all
+// 23 on a clean tree.
+//
+// So the remedy inverts the POLICY instead of widening the shape. Attribution
+// EXCUSES a three-component literal when a third party is adjacent. The very
+// same scanner REPORTS a two-component literal when the CLI's OWN NAME is
+// adjacent. One tokenizer, one adjacency check, two policies — see
+// `scanForAdjacency` below, which both callers are required to route through.
+// Nothing on the live surface names the CLI next to a bare two-part number, so
+// the deny side is empty today and the gate is about what gets written tomorrow.
+//
+// WHY THIS REMEDY AND NOT A WIDER ONE. A bare `1.3` with no adjacent subject
+// still passes silently, so this remedy ships a residual hole of its own. The
+// argument for it is REACHABILITY, and only reachability: nobody fabricates a
+// CLI version by writing a bare `1.3` into prose — they write `agentskills 1.3`.
+// The covered case is the one that actually gets written; the uncovered one is
+// not reachable by a plausible author. Do not read this comment as a promise to
+// eliminate the remaining hole, and do not cite it to demand elimination: the
+// hole is a property of line-oriented attribution, not a deferred task.
+//
+// The CLI's name is LIFTED, like everything else here. The source is go.mod's
+// `module` directive, NOT site/package.json's `name`, and that choice is
+// measured rather than stylistic: package.json's name is `agentskills-site`,
+// which names THIS SITE PACKAGE and not the CLI. Deriving from it would make
+// the gate hunt for `agentskills-site 1.3` and sail straight past the
+// `agentskills 1.3` it exists to catch — a gate that reports green because it
+// is looking for the wrong subject. go.mod's module path is the only place in
+// the repository that states the CLI's own name. Typing it would put the gate's
+// own subject into the class of things the gate cannot verify.
+const TWO_COMPONENT = /(?<!\d)(?<!\d\.)v?\d+\.\d+(?!\.?\d)/;
+
+/** The CLI's own name, from go.mod's module path. Never typed. */
+export function declaredCliName(gomod) {
+  const m = /^module[ \t]+(\S+)[ \t]*$/m.exec(gomod);
+  return m ? m[1].split("/").pop().toLowerCase() : null;
+}
+
+/**
+ * Every TWO-component literal on `line` that the line attributes to the CLI
+ * itself — `agentskills 1.3`, `agentskills v1.3`.
+ *
+ * Three-component literals are left entirely to `handTypedCliVersions`; this
+ * path exists only for the truncated form the shape matcher cannot see.
+ */
+export function truncatedCliVersions(line, cliName) {
+  if (!cliName) {
+    throw new Error(
+      "no CLI name was derived from go.mod's module directive. Without it this gate " +
+        "would report nothing at all while looking exactly like a gate that found nothing, " +
+        "so it is a hard error rather than a quiet pass.",
+    );
+  }
+  return scanForAdjacency(line, {
+    shape: TWO_COMPONENT,
+    subjects: [{ name: cliName, pin: null }],
+    // POLICY: adjacency to the CLI's own name REPORTS. The inverse verdict,
+    // over the identical window the three-component policy uses.
+    verdict: (hit) => hit !== null,
+  });
+}
+
+/**
  * Every version literal on `line` that is NOT attributed to a named third
  * party — i.e. every literal the line hand-types as if it were the CLI's.
  *
@@ -415,26 +522,21 @@ function attributedToThirdParty(subjects) {
  * from the END OF THE PREVIOUS MATCH to its own start.
  */
 export function handTypedCliVersions(line, subjects) {
-  const attributed = attributedToThirdParty(subjects);
   const byName = new Map(subjects.map((s) => [s.name, s]));
-  const scan = new RegExp(VERSION_LITERAL.source, "g");
-  const out = [];
-  let windowStart = 0;
-  for (const m of line.matchAll(scan)) {
-    const hit = attributed.exec(line.slice(windowStart, m.index));
-    windowStart = m.index + m[0].length;
-    if (!hit) {
-      out.push(m[0]); // nothing named it: the default is that it is the CLI's
-      continue;
-    }
-    const subject = byName.get(hit[1].toLowerCase());
-    // Adjacency alone excuses ONLY the subject the specification forces out of
-    // the pin check. Everything else must also match what it is pinned at.
-    if (PIN_EXEMPT.has(subject.name)) continue;
-    if (subject.pin !== null && versionCore(m[0]) === subject.pin) continue;
-    out.push(m[0]);
-  }
-  return out;
+  return scanForAdjacency(line, {
+    shape: VERSION_LITERAL,
+    subjects,
+    // POLICY: adjacency to a named third party EXCUSES — but only when the
+    // literal also equals what that third party is pinned at. Adjacency is a
+    // syntactic proxy for attribution; it establishes that a subject stands
+    // next to a number, never that the number BELONGS to it.
+    verdict: (hit, literal) => {
+      if (!hit) return true; // nothing named it: the default is that it is the CLI's
+      const subject = byName.get(hit[1].toLowerCase());
+      if (PIN_EXEMPT.has(subject.name)) return false;
+      return !(subject.pin !== null && versionCore(literal) === subject.pin);
+    },
+  });
 }
 
 /**
@@ -448,7 +550,7 @@ export function handTypedCliVersions(line, subjects) {
  * proposal §10.4), and `tests/` (test sources ship nothing to a reader, and
  * this very file quotes `1.3.0` in its own control).
  */
-async function siteSourceFiles() {
+export async function siteSourceFiles() {
   const roots = ["src", "scripts", "public"];
   const out = ["astro.config.mjs"];
   for (const r of roots) {
@@ -910,4 +1012,207 @@ test("the search box is backed by a real index", async () => {
       ? "a search box is rendered but dist/pagefind/ has no index behind it"
       : "an index shipped but no search UI renders — one of the two is wrong",
   );
+});
+
+// ── FIX-5: the published build floor must be the declared build floor ───────
+//
+// `docs/users_guide.md` is the one PAGES entry, so whatever it states about the
+// toolchain is what the site publishes. Both docs stated a floor of Go 1.22
+// while go.mod declared 1.26.4 — a number that was not derived from anything,
+// which is this file's whole subject.
+//
+// MEASURED, NOT INFERRED. The premise handed to me was "since Go 1.21 the
+// directive is an enforced floor, so a 1.22 machine cannot build this repo".
+// Enforcement is real and I confirmed it on a real toolchain; "cannot build" is
+// too strong for the default configuration. On go1.26.1:
+//
+//   GOTOOLCHAIN=local go build ./...  -> exit 1
+//                       go: go.mod requires go >= 1.26.4 (running go 1.26.1)
+//   GOTOOLCHAIN=auto  go build ./...  -> exit 0 (downloads 1.26.4 and builds)
+//
+// So the enforced floor is 1.26.4, stated by the toolchain itself, and an older
+// toolchain satisfies it only by fetching that version. The docs now say that.
+// The floor for toolchain SWITCHING is a number I did not test and do not write.
+const GO_FLOOR_DOCS = ["docs/users_guide.md", "docs/development.md"];
+
+/** The Go version a requirements list tells a reader to install. */
+export function statedGoFloor(text) {
+  const m = /\*\*Go Runtime:\*\*\s*Go\s*(\d+(?:\.\d+)+)/.exec(text);
+  return m ? m[1] : null;
+}
+
+/** The Go version go.mod declares — the authority, read not transcribed. */
+export function declaredGoVersion(gomod) {
+  const m = /^go[ \t]+(\d+\.\d+(?:\.\d+)?)[ \t]*$/m.exec(gomod);
+  return m ? m[1] : null;
+}
+
+test("the documented Go floor is the floor go.mod declares", async () => {
+  const declared = declaredGoVersion(await read(join(repoRoot, "go.mod")));
+  assert.ok(declared, "go.mod states no `go` directive — the claim has no authority to check against");
+
+  // CONTROLS. Both extractors must be shown alive, or two nulls compare equal
+  // and the gate passes by agreeing about nothing.
+  assert.equal(declaredGoVersion("module x\n\ngo 9.9.9\n"), "9.9.9", "control failed: the go.mod reader is dead");
+  assert.equal(
+    statedGoFloor("*   **Go Runtime:** Go 9.9.9 or higher installed"),
+    "9.9.9",
+    "control failed: the doc-floor reader is dead",
+  );
+  assert.equal(statedGoFloor("no requirements list here"), null, "the doc-floor reader invents a version");
+
+  for (const rel of GO_FLOOR_DOCS) {
+    const body = await read(join(repoRoot, rel));
+    const stated = statedGoFloor(body);
+
+    // VACUITY: a doc with no Go Runtime line would agree with go.mod by
+    // saying nothing, which is not agreement.
+    assert.ok(stated !== null, `${rel} no longer states a Go Runtime requirement — this gate went vacuous`);
+    assert.equal(
+      stated,
+      declared,
+      `${rel} tells the reader to install Go ${stated}, but go.mod declares ${declared}. ` +
+        `The toolchain enforces the declared version, so the published instruction is wrong ` +
+        `for anyone building with GOTOOLCHAIN=local.`,
+    );
+  }
+});
+
+// ── FIX-6 probe set ─────────────────────────────────────────────────────────
+//
+// Partitioned from the INPUT SPACE, not from the matcher, and not adopted from
+// the proposer's probes: cert costed this remedy with its own set and said
+// plainly that one probe set of its proposer is not a gate. The axes are
+// (i) does the line attribute the number to the CLI, (ii) what joins them,
+// (iii) how many components the literal has, (iv) what the live surface
+// actually contains. Allow side and deny side are counted separately below so
+// that a set which has quietly collapsed to one side cannot convict.
+
+// DENY SIDE — a truncated reference to the CLI's own version. Must REPORT.
+const TRUNCATED_MUST_REPORT = [
+  ["agentskills 1.3", ["1.3"], "bare adjacency"],
+  ["agentskills v1.3", ["v1.3"], "v-prefix on the number"],
+  ["install agentskills 1.3 today", ["1.3"], "inside a sentence"],
+  ["agentskills: 1.3", ["1.3"], "colon joiner"],
+  ["agentskills@1.3", ["1.3"], "npm-style pin joiner"],
+  ["agentskills version 1.3", ["1.3"], "the word version"],
+  ["AgentSkills 1.3", ["1.3"], "case-insensitive subject"],
+  ["agentskills >= 1.3", ["1.3"], "comparison joiner"],
+  ["agentskills 12.34", ["12.34"], "multi-digit components"],
+  ["agentskills1.3", ["1.3"], "no gap at all"],
+  ["astro 7.2 and agentskills 1.3", ["1.3"], "per-match: the third-party literal is not reported"],
+];
+
+// ALLOW SIDE — everything else. Must stay SILENT.
+const TRUNCATED_MUST_IGNORE = [
+  ["The site's page allowlist is LIFTED from that list (proposal §7.1)", "a proposal cross-reference"],
+  ["  padding: 0.1em 0.35em;", "CSS values, two on one line"],
+  ['<path d="M17 21h6" stroke-width="2.5" />', "an SVG stroke width"],
+  ["This site is built with astro 7.2", "a third party, not the CLI"],
+  ["agentskills builds with astro 7.2", "the CLI is named but is NOT adjacent"],
+  ["myagentskills 1.3", "the CLI name is the TAIL of a longer word"],
+  ["// https://ghchinoy.github.io/agentskills/ (proposal §10.4, Q3)", "the real astro.config line: a URL"],
+  ["agentskills 1.3.0", "THREE components — left to the other detection path"],
+  ["agentskills 1.2.3.4", "four components — not a version literal at all"],
+];
+
+test("controls: a truncated reference to the CLI's own version is caught", async () => {
+  const cli = declaredCliName(await read(join(repoRoot, "go.mod")));
+  assert.equal(cli, "agentskills", "the CLI name lifted from go.mod's module path is not what this set probes");
+
+  // VACUITY, both directions. A set that has collapsed to one side cannot
+  // convict, so both sides are counted and both must be populated.
+  assert.ok(TRUNCATED_MUST_REPORT.length >= 8, "the deny side of the probe set has been hollowed out");
+  assert.ok(TRUNCATED_MUST_IGNORE.length >= 8, "the allow side of the probe set has been hollowed out");
+
+  for (const [line, expected, klass] of TRUNCATED_MUST_REPORT) {
+    assert.deepEqual(
+      truncatedCliVersions(line, cli),
+      expected,
+      `[deny: ${klass}] a truncated CLI version was NOT reported in ${JSON.stringify(line)}`,
+    );
+  }
+  for (const [line, klass] of TRUNCATED_MUST_IGNORE) {
+    assert.deepEqual(
+      truncatedCliVersions(line, cli),
+      [],
+      `[allow: ${klass}] a legitimate two-component number was reported in ${JSON.stringify(line)}`,
+    );
+  }
+
+  // An underived CLI name must be a hard error, never a silent pass: this gate
+  // reports only what it can name, so a missing name disables it completely.
+  assert.throws(
+    () => truncatedCliVersions("agentskills 1.3", null),
+    /hard error rather than a quiet pass/,
+    "a missing CLI name must stop the suite, not quietly disable this detection path",
+  );
+  assert.equal(declaredCliName("go 1.26.4\n"), null, "the module-path reader invents a name when there is none");
+});
+
+test("controls: both polarities are ONE predicate under two policies, not two predicates", () => {
+  // The failure this guards against is DRIFT, and drift is invisible to every
+  // behavioural test in this file: two near-duplicate scanners agree perfectly
+  // on the day they are written, and nothing here compares them afterwards. So
+  // the structural claim is asserted directly — both callers must delegate, and
+  // neither may carry a scanning loop of its own.
+  for (const [name, fn] of [
+    ["handTypedCliVersions", handTypedCliVersions],
+    ["truncatedCliVersions", truncatedCliVersions],
+  ]) {
+    const src = fn.toString();
+    assert.match(src, /scanForAdjacency\(/, `${name} no longer routes through the shared adjacency scanner`);
+    assert.doesNotMatch(
+      src,
+      /matchAll|attributedToThirdParty\(/,
+      `${name} has grown a second copy of the scan; two copies are two things that can drift`,
+    );
+  }
+
+  // …and the shared window arithmetic is observable from BOTH polarities: a
+  // subject that is present but NOT adjacent must fail to attribute under
+  // either policy. Same window, opposite verdict.
+  assert.deepEqual(
+    handTypedCliVersions("astro is at 7.2.4", [{ name: "astro", pin: "7.2.4" }]),
+    ["7.2.4"],
+    "the EXCUSE policy attributed a non-adjacent subject",
+  );
+  assert.deepEqual(
+    truncatedCliVersions("agentskills is at 1.3", "agentskills"),
+    [],
+    "the REPORT policy attributed a non-adjacent subject",
+  );
+});
+
+test("controls: the two-component surface is real, and none of it names the CLI", async () => {
+  // THE POINT OF THIS CONTROL. "Zero false fires" is worthless if the scanned
+  // surface contains no two-component literals to fire on. It contains many,
+  // and this counts them THROUGH THE GATE'S OWN ENUMERATION rather than a
+  // second copy of it — two enumerations are two things that can drift, and the
+  // day they diverge this control certifies a surface the gate never reads.
+  const cli = declaredCliName(await read(join(repoRoot, "go.mod")));
+  const files = await siteSourceFiles();
+  assert.ok(files.length > 0, "the site-source enumeration found no files");
+
+  let twoComponent = 0;
+  const reported = [];
+  for (const f of files) {
+    const body = await read(join(siteRoot, f));
+    for (const [i, line] of body.split("\n").entries()) {
+      twoComponent += [...line.matchAll(new RegExp(TWO_COMPONENT.source, "g"))].length;
+      for (const hit of truncatedCliVersions(line, cli)) reported.push(`${f}:${i + 1}: ${hit}`);
+    }
+  }
+
+  // Measured at this head: 23 two-component literals, every one legitimate.
+  // The floor is asserted rather than the exact count, so that adding a
+  // proposal cross-reference is not a test failure — but a surface that has
+  // gone empty, which would make the zero below meaningless, is.
+  assert.ok(
+    twoComponent >= 20,
+    `only ${twoComponent} two-component literals on the scanned surface. This control exists ` +
+      `to prove the ZERO below is a real result and not an empty population; below 20 it no ` +
+      `longer proves that, and the widen-the-shape option needs re-costing.`,
+  );
+  assert.deepEqual(reported, [], `truncated CLI versions on the live surface:\n  ${reported.join("\n  ")}`);
 });
