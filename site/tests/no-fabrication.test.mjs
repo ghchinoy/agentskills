@@ -121,7 +121,14 @@ test("no built page claims runtime support for an agent product", async () => {
 
 // ── The version gate ────────────────────────────────────────────────────────
 
-const VERSION_LITERAL = /\b\d+\.\d+\.\d+\b/;
+// The leading `v?` is not decoration. An earlier form of this matcher was
+// `\b\d+\.\d+\.\d+\b`, and it MISSED `v9.9.9` — because there is no word
+// boundary between `v` and `9`. This repository writes its versions with the
+// `v` (its tags are `v1.0.0` … `v1.3.0`), so the one spelling a person is most
+// likely to type by hand was the one spelling the gate could not see. Found by
+// planting `Requires v9.9.9 or later.` on the landing page and watching the
+// gate stay green.
+const VERSION_LITERAL = /(?<![\w.])v?\d+\.\d+\.\d+(?![\w.])/;
 
 /**
  * The population: every site-authored file whose content can reach a rendered
@@ -149,8 +156,22 @@ async function siteSourceFiles() {
 }
 
 test("controls: the version-literal matcher fires on a planted version", () => {
-  assert.ok(VERSION_LITERAL.test('const version = "1.3.0";'), "matcher missed a planted version literal");
-  assert.ok(!VERSION_LITERAL.test("the CLI version comes from the Releases API"), "matcher fired on clean text");
+  // Both spellings, because both are things a person types.
+  for (const s of [
+    'const version = "1.3.0";',
+    "Requires v9.9.9 or later.",
+    "agentskills 1.2.1 adds a scan flag",
+    "install v1.0.0 from the releases page",
+  ]) {
+    assert.ok(VERSION_LITERAL.test(s), `matcher missed a planted version literal: ${JSON.stringify(s)}`);
+  }
+  for (const s of [
+    "the CLI version comes from the Releases API",
+    "see section 7.4 of the proposal",
+    "an IPv4 address like 10.0.0.1 is not a version", // four parts, not three
+  ]) {
+    assert.ok(!VERSION_LITERAL.test(s), `matcher fired on clean text: ${JSON.stringify(s)}`);
+  }
 });
 
 test("no CLI version is hand-typed into a site-authored file", async () => {
