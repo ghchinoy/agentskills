@@ -519,8 +519,27 @@ export function reasonDefects(register) {
     }
     const text = reason.trim();
     // The filename restated is not a reason for deferring the file.
+    //
+    // R4-1. The stem is LITERAL TEXT and is removed literally. It used to be
+    // interpolated into `new RegExp(stem, "gi")` unescaped, which is a
+    // filename-controlled regex — reviewer's finding, reproduced here before
+    // it was fixed, measured against the extracted function:
+    //
+    //   stem "c++"  -> SyntaxError: Invalid regular expression: Nothing to repeat
+    //   stem "a[b"  -> SyntaxError: Unterminated character class
+    //   stem "a.c",  reason "abc"   -> FLAGGED as restating the filename
+    //   stem "re*",  reason "reeee" -> FLAGGED as restating the filename
+    //
+    // The two throws are loud and fail closed; the last two are the reason this
+    // was worth fixing rather than escaping — a metacharacter stem silently
+    // WIDENS the check and accuses a legitimate reason of restating a name it
+    // does not contain. split/join says what the code always meant and cannot
+    // do either. Every key in the live register is plain today, so none of this
+    // was reachable in production; it is fixed because the register is
+    // hand-edited and the next filename is not under this file's control.
     const stem = doc.replace(/^.*\//, "").replace(/\.md$/i, "");
-    if (text.replace(new RegExp(stem, "gi"), "").replace(/[^a-z]/gi, "").length === 0) {
+    const withoutStem = text.toLowerCase().split(stem.toLowerCase()).join("");
+    if (withoutStem.replace(/[^a-z]/gi, "").length === 0) {
       out.push({ doc, why: "the reason only restates the document's own name" });
       continue;
     }
@@ -598,9 +617,45 @@ test("controls: the reason predicate fires on each way a reason column rots", ()
     ["the reason only restates the document's own name"],
     "a reason that merely re-names the document was not caught",
   );
+  // Case-folded, and this is the FORM THE ROT ACTUALLY TAKES: nobody types the
+  // lower-case filename into a reason column, they type "Releasing". Added
+  // because plant R4-oo (match the stem case-sensitively) came back GREEN — the
+  // fold was real behaviour with nothing standing on it.
+  assert.deepEqual(
+    reasonDefects({ ...good, "releasing.md": "Releasing." }).map((d) => d.why),
+    ["the reason only restates the document's own name"],
+    "a CAPITALISED restatement of the document's name was not caught",
+  );
   assert.deepEqual(
     reasonDefects({ ...good, "c.md": "Phase 7: publishes at /a/." }).map((d) => d.why),
     ["the reason is a duplicate of the one on a.md"],
     "a reason pasted from another row was not caught",
   );
+});
+
+// R4-1. A filename is not a pattern. The stem used to reach `new RegExp`
+// unescaped, so the document's own name decided how the check behaved: two of
+// these threw, and two quietly matched more than themselves and accused a valid
+// reason. Reviewer's finding; these are their four cases plus the backslash.
+// Kept as a control because the register is hand-edited and the fix is
+// invisible — nothing in the live population can ever exercise it.
+test("controls: a register key containing regex metacharacters is treated as TEXT", () => {
+  for (const stem of ["c++", "a[b", "re*", "a.c", "x(y", "q?", "back\\slash", "^caret$"]) {
+    const doc = `${stem}.md`;
+    assert.deepEqual(
+      reasonDefects({ [doc]: "Phase 7: publishes with the rest of the guide." }),
+      [],
+      `the stem ${JSON.stringify(stem)} was read as a PATTERN, not as text — ` +
+        `it either threw or matched something it does not literally contain`,
+    );
+    assert.deepEqual(
+      reasonDefects({ [doc]: stem }).map((d) => d.why),
+      ["the reason only restates the document's own name"],
+      `restating the metacharacter stem ${JSON.stringify(stem)} was not caught`,
+    );
+  }
+
+  // The specific silent widenings, pinned by name so a regression reads clearly.
+  assert.deepEqual(reasonDefects({ "a.c.md": "abc" }), [], "stem a.c matched abc as a wildcard");
+  assert.deepEqual(reasonDefects({ "re*.md": "reeee" }), [], "stem re* matched reeee as a repeat");
 });
