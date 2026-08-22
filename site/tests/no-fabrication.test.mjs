@@ -243,17 +243,32 @@ const VERSION_LITERAL = /(?<!\d)(?<!\d\.)v?\d+\.\d+\.\d+(?!\.?\d)/;
 // version hides inside a statement that is simultaneously true of sharp.
 //
 // It is latent today — no dependency is pinned at the CLI's version — and it
-// is NOT FIXED HERE, for a reason worth writing down rather than leaving as an
-// omission. This gate cannot know the CLI's version. Proposal §7.4 requires
-// that version to be DERIVED from the Releases API and never typed, which is
-// the property this whole file exists to enforce, so there is no local
-// constant to compare a literal against. A gate that could recognise the
-// coincidence would have to hard-code the very literal it forbids.
+// is now ALARMED rather than documented-as-open. The reason it was withdrawn
+// last round does not hold. That reason was: "this gate cannot know the CLI's
+// version ... so there is no local constant to compare a literal against, and a
+// gate that could recognise the coincidence would have to hard-code the very
+// literal it forbids." But there IS a local constant, and this file's own
+// header cites it twice: `cmd/root.go` declares `var Version = "1.3.0"`. Lifting
+// it at run time is the same operation attestedPins() already performs on go.mod
+// and docs/releasing.md — nothing is typed. So the coincidence alarm reads
+// cmd/root.go and package.json, compares two DERIVED values, and fires if any
+// declared dependency is pinned at the CLI's own version. It is `coincidentPins`
+// below, asserted with both-direction controls by "controls: the pin check
+// couples the gate to the declared versions".
 //
-// Nor can the ambiguity be resolved by reporting instead of excusing: when the
-// two versions coincide the SENTENCE IS GENUINELY AMBIGUOUS, and reporting it
-// would block a true statement about a dependency — reopening precisely the
-// false-fire class that the attribution rule above was built to close.
+// TWO things bound the claim, stated rather than buried:
+//   * `var Version` is the GoReleaser-overridden compiled-in DEFAULT, so it can
+//     lag the released version. That weakens it as *the* CLI version but not as
+//     a coincidence alarm, whose job is to fire when a pin lands on the version
+//     the repository states for its own CLI — strictly more than nothing.
+//   * The alarm does NOT resolve the ambiguity of a coincident sentence by
+//     reporting it — that WOULD block a true statement about a dependency and
+//     reopen the false-fire class the attribution rule closed. It instead makes
+//     the coincidence itself a build failure, so the ambiguous state cannot
+//     arise silently: the maintainer re-pins, or derives the displayed version.
+//     Blocking the CONFIGURATION, not the prose, is what the withdrawn argument
+//     conflated — it refuted "make the gate report ambiguous prose" and then
+//     applied that refutation to a control that reads no prose at all.
 
 // ── THE SUBJECT SET IS THE ENTIRE EXCUSE SURFACE, SO IT IS LIFTED ───────────
 //
@@ -405,6 +420,28 @@ export function thirdPartySubjects(pkg, attested = {}) {
 
 /** The subject names alone, for the controls that ask what is attributable. */
 export const subjectNames = (subjects) => subjects.map((s) => s.name);
+
+/**
+ * The version cmd/root.go compiles in as `var Version = "x.y.z"`. This is the
+ * GoReleaser-overridden DEFAULT (`.goreleaser.yaml` sets it via ldflags at
+ * release), so it can LAG the released version — it is a coincidence subject,
+ * not an authority on the live CLI version. Null when the declaration is gone,
+ * so the coincident-pin control loses its subject LOUDLY rather than passing.
+ */
+export function declaredCliVersion(rootGo) {
+  const m = /var\s+Version\s*=\s*"(\d+\.\d+\.\d+)"/.exec(String(rootGo ?? ""));
+  return m ? m[1] : null;
+}
+
+/**
+ * The coincident-pin hatch: named third-party subjects whose declared pin is
+ * the CLI's own version. When one exists, a hand-typed CLI version hides inside
+ * any sentence that is also true of that dependency — adjacency+pin attribution
+ * excuses it. Nothing is typed here; both operands are derived. Empty is safe.
+ */
+export function coincidentPins(subjects, cli) {
+  return cli ? subjects.filter((s) => s.pin === cli).map((s) => s.name).sort() : [];
+}
 
 /**
  * Matches a left-context window that ENDS in a named third-party subject.
@@ -1097,6 +1134,57 @@ test("controls: the pin check couples the gate to the declared versions", async 
     ["7.2.4"],
     "prose naming a version the pin has moved away from was excused — the gate is " +
       "checking adjacency only, and cert's six-line class is reopened",
+  );
+
+  // AND THE COINCIDENT-PIN HATCH IS NOW AN ALARM, not a documented omission.
+  // The one hole left after adjacency+pin attribution is a literal that is BOTH
+  // a named subject's real pin AND the CLI's own version: with a dependency
+  // pinned there, a hand-typed CLI version hides inside a sentence that is
+  // simultaneously true of that dependency. It was withdrawn last round as
+  // unbuildable — "the gate cannot know the CLI's version ... would have to
+  // hard-code the very literal it forbids." That premise is false: cmd/root.go
+  // states `var Version = "x.y.z"`, which this file's own header cites twice,
+  // and lifting it is the same run-time read attestedPins() already does for
+  // `go` and `semantic versioning`. So the coincidence is ALARMED here — two
+  // files read, two derived values compared, no sentence blocked, no prose read.
+  // (The caveat that `var Version` is the GoReleaser-overridden default lives on
+  // declaredCliVersion; it bounds this as a coincidence alarm, which is strictly
+  // more than the nothing that was here, not as an authority on the live version.)
+  const cli = declaredCliVersion(await read(join(repoRoot, "cmd/root.go")));
+  assert.ok(
+    cli,
+    "cmd/root.go no longer declares `var Version` — the coincident-pin control has lost its subject",
+  );
+  assert.deepEqual(
+    coincidentPins(subjects, cli),
+    [],
+    `COINCIDENT PIN: a declared dependency is pinned at the CLI's own version ${cli}. A ` +
+      `hand-typed CLI version now hides inside any sentence that is also true of that ` +
+      `dependency, and adjacency+pin attribution excuses it. Re-pin the dependency, or if ` +
+      `the collision is genuine, derive the displayed CLI version so the two cannot be confused.`,
+  );
+
+  // Positive controls, both directions, over SYNTHETIC package.json objects so
+  // the shipped repo is not mutated. A dependency pinned AT the CLI version must
+  // fire; one pinned elsewhere must not — the green above is then the absence of
+  // a coincidence, not a dead comparison.
+  const collided = thirdPartySubjects(
+    { ...pkg, dependencies: { ...pkg.dependencies, "coincident-probe": cli } },
+    attested,
+  );
+  assert.deepEqual(
+    coincidentPins(collided, cli),
+    ["coincident-probe"],
+    "control failed: a dependency pinned at the CLI version was not flagged — the alarm is dead",
+  );
+  const clear = thirdPartySubjects(
+    { ...pkg, dependencies: { ...pkg.dependencies, "coincident-probe": "0.0.1" } },
+    attested,
+  );
+  assert.deepEqual(
+    coincidentPins(clear, cli),
+    [],
+    "control failed: a dependency NOT at the CLI version was flagged — the alarm over-fires",
   );
 });
 

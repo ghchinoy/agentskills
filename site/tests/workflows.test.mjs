@@ -64,6 +64,27 @@
 // site-ci.yml now requires editing the pinned set in this file, which is what
 // makes the set a decision rather than a description.
 //
+// AND THE SET IS EXTRACTED BY PARSING, NOT BY REGEX — THIS IS THE ROUND-5 FIX.
+// A whitelist is only as honest as the extractor that feeds it. Set-equality
+// over a REGEX-extracted set proves nothing about a value the regex could not
+// see: an unseen value leaves the extracted set UNCHANGED, so equality still
+// holds and the row stays green. That seam was measured open in two places at
+// once — a `uses:` behind a trailing `# comment` (invisible to an end-anchored
+// regex) and a JOB-level `permissions:` block (invisible to a column-0 regex) —
+// which together put a YAML-valid, capability-real Pages deploy into site-ci.yml
+// with the whole suite green. Two holes found from sixteen plants is a POPULATED
+// class, not two members: quoting (`pages: 'write'`), flow style (`- {uses:
+// X}`), indentation and comments are each a spelling a regex extractor must be
+// taught one at a time and a parser already knows. So the extractors below PARSE
+// the workflow with js-yaml — the parser GitHub Actions itself uses — and read
+// `uses:`, `run:`, `permissions:` and the trigger set off the resulting object,
+// across EVERY job. A grant nested under `jobs.<id>.permissions`, a quoted
+// scalar, a commented action, a flow-mapping step: the parser sees each the way
+// GitHub does, so the pinned-set claim becomes a claim about what GitHub would
+// RUN rather than about what one regex happened to match. A file the parser
+// cannot read at all returns null, and null is FIRING for the same reason a
+// missing block is — a workflow the gate cannot understand is not one it passes.
+//
 // AND THE PLANT ITSELF IS THE UNEXAMINED PREMISE. A positive control that
 // string-replaces into the RAW file can land in a prose comment — `docs.yml`
 // names `cancel-in-progress: false` at line 53 in prose before setting it at
@@ -75,7 +96,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import { read, repoRoot, siteRoot } from "./_helpers.mjs";
+
+// js-yaml is resolved from the site's own node_modules — the same dependency the
+// re-cert's G4 guard used to prove these plants were real deploys and not merely
+// strings in a file. It is the parser GitHub Actions itself reads these
+// workflows with, so it is the instrument that answers the question every "and
+// NOTHING else" claim below is actually about: what would GitHub RUN?
+const jsyaml = createRequire(import.meta.url)("js-yaml");
 
 const DOCS = join(repoRoot, ".github/workflows/docs.yml");
 const SITE_CI = join(repoRoot, ".github/workflows/site-ci.yml");
@@ -107,7 +136,6 @@ const M = {
   tagTrigger: /^[ \t]+tags:/m,
   pagesPermission: /^[ \t]+pages:[ \t]*write[ \t]*$/m,
   deployAction: /actions\/(deploy-pages|upload-pages-artifact|configure-pages)@/,
-  continueOnError: /continue-on-error/,
   // FIX-3 (S8): a base-branch filter on a trigger, in either spelling.
   branchFilter: /^[ \t]+branches(-ignore)?:/m,
 };
@@ -170,53 +198,157 @@ export function onBlock(yaml) {
 }
 
 /**
- * The keys of a block at the block's OWN indent. `branches:` and `paths:` are
- * how a trigger is configured, not triggers themselves, so only the shallowest
- * level counts. The indent is measured rather than assumed, so re-indenting a
- * file does not silently empty the set.
+ * Parse a workflow's executable YAML into the object GitHub would run, or null
+ * when it cannot be parsed at all.
+ *
+ * Every set-based claim below is ABOUT a property of the parsed workflow — which
+ * actions run, which commands run, which permissions are granted, what triggers
+ * it — and NOT about the byte string. A regex over the text cannot see a value
+ * behind a trailing `# comment`, a scalar in `'quotes'`, a step written in flow
+ * style (`- {uses: X}`), or a grant nested under `jobs.<id>.permissions`; the
+ * parser sees all four the way GitHub does. Null is a real answer, not an error:
+ * a workflow the gate cannot understand is not a workflow it may pass, so every
+ * caller treats null as FIRING, exactly as they treat a missing block.
  */
-export function blockKeys(body) {
-  if (body === null) return null;
-  const lines = body.split("\n").filter((l) => l.trim() !== "");
-  if (lines.length === 0) return [];
-  const base = Math.min(...lines.map((l) => /^[ \t]*/.exec(l)[0].length));
-  return lines
-    .filter((l) => /^[ \t]*/.exec(l)[0].length === base)
-    .map((l) => /^[ \t]*([\w-]+):/.exec(l))
-    .filter(Boolean)
-    .map((m) => m[1]);
+function parseWorkflow(yaml) {
+  try {
+    const doc = jsyaml.load(yaml);
+    return doc && typeof doc === "object" ? doc : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every job in the workflow, as an array (empty when there are none). */
+function jobsOf(doc) {
+  return doc && doc.jobs && typeof doc.jobs === "object" ? Object.values(doc.jobs) : [];
+}
+
+/** Every step across every job — the extraction is file-wide, so a deploy in a
+ *  SECOND job is as visible as one in the first. */
+function stepsOf(doc) {
+  return jobsOf(doc).flatMap((j) => (j && Array.isArray(j.steps) ? j.steps : []));
 }
 
 /**
- * `permissions:` as normalised `key: value` strings. Quotes and run-together
- * spacing are removed, because `pages: write`, `pages:   write` and
- * `pages: 'write'` are the same grant to GitHub and differ only to a regex.
+ * The trigger keys — the events this workflow runs on. `on:` may be a mapping
+ * (`{push: …}`), a bare string (`on: push`) or a sequence (`on: [push, …]`);
+ * all three are the same statement to GitHub and are normalised to a key list
+ * here. `branches:` and `paths:` are how a trigger is configured, not triggers
+ * themselves, so they never appear — they are nested under a trigger, not
+ * alongside one, in the parsed object. Null (no `on:` at all) FIRES.
+ */
+export function triggerKeys(yaml) {
+  const doc = parseWorkflow(yaml);
+  if (doc === null) return null;
+  const on = doc.on;
+  if (on === null || on === undefined) return null;
+  if (typeof on === "string") return [on];
+  if (Array.isArray(on)) return on.map(String);
+  if (typeof on === "object") return Object.keys(on);
+  return null;
+}
+
+/**
+ * `permissions:` as normalised `key: value` strings, gathered from the
+ * workflow-level block AND from EVERY job-level block.
+ *
+ * A job-level `permissions:` block is the grant actually in force for that job,
+ * and it is where a Pages deployment hides from a workflow-level check: the
+ * old column-0 extractor could not see it at all. The claim "site-ci.yml holds
+ * exactly contents: read" is false the moment ANY job grants more, wherever the
+ * grant is written, so the extraction is over the whole document. Quoting and
+ * spacing are gone for free — the parser has already turned `pages: 'write'`,
+ * `pages:   write` and `pages: write` into the one value they are to GitHub.
+ *
+ * The `write-all` / `read-all` shorthand is a bare string, not a mapping; it is
+ * kept as its own entry so it can never equal `contents: read`. Null (no
+ * permissions block anywhere) FIRES, for the same reason the old extractor's
+ * null did: an absent restriction is not a restriction.
  */
 export function permissionEntries(yaml) {
-  const body = topBlock(yaml, "permissions");
-  if (body === null) return null;
-  return body
-    .split("\n")
-    .filter((l) => l.trim() !== "")
-    .map((l) => {
-      const m = /^[ \t]*([\w-]+):[ \t]*(.*?)[ \t]*$/.exec(l);
-      return m ? `${m[1]}: ${m[2].replace(/^['"]|['"]$/g, "")}` : l.trim();
-    });
-}
-
-/** Every `uses:` value in the file — the actions this workflow can run. */
-export function usesValues(yaml) {
-  return [...yaml.matchAll(/^[ \t]*-?[ \t]*uses:[ \t]*(\S+)[ \t]*$/gm)].map((m) => m[1]);
+  const doc = parseWorkflow(yaml);
+  if (doc === null) return null;
+  const blocks = [];
+  if (doc && typeof doc === "object" && "permissions" in doc) blocks.push(doc.permissions);
+  for (const job of jobsOf(doc)) {
+    if (job && typeof job === "object" && "permissions" in job) blocks.push(job.permissions);
+  }
+  if (blocks.length === 0) return null;
+  const entries = new Set();
+  for (const block of blocks) {
+    if (block === null || block === undefined) continue; // an empty `permissions:` grants nothing
+    if (typeof block === "string") {
+      entries.add(block); // `write-all` / `read-all` — never equals contents: read
+    } else if (typeof block === "object") {
+      for (const [k, v] of Object.entries(block)) entries.add(`${k}: ${v}`);
+    }
+  }
+  return [...entries];
 }
 
 /**
- * Every `run:` value in the file — the shell this workflow can run. A block
- * scalar (`run: |`) yields `"|"`, which is not on any pinned list and so fires:
- * a multi-line script is exactly where a deploy command would hide, and it
- * should have to be re-pinned deliberately rather than admitted silently.
+ * Every `uses:` value in the file — the actions this workflow can run, across
+ * ALL jobs and steps. Parsed rather than matched, so a trailing comment, a
+ * quoted value or a flow-style step (`- {uses: X}`) cannot hide an action from
+ * the pin. Null (an unparseable file) FIRES.
+ */
+export function usesValues(yaml) {
+  const doc = parseWorkflow(yaml);
+  if (doc === null) return null;
+  return stepsOf(doc)
+    .filter((s) => s && typeof s.uses === "string")
+    .map((s) => s.uses);
+}
+
+/**
+ * Every `run:` value in the file — the shell this workflow can run, across all
+ * jobs and steps. A block scalar (`run: |`) parses to its whole multi-line
+ * script, which is on no pinned list and so fires: a multi-line script is
+ * exactly where a deploy command would hide, and it should have to be re-pinned
+ * deliberately rather than admitted silently. Null (an unparseable file) FIRES.
  */
 export function runValues(yaml) {
-  return [...yaml.matchAll(/^[ \t]*-?[ \t]*run:[ \t]*(.+?)[ \t]*$/gm)].map((m) => m[1]);
+  const doc = parseWorkflow(yaml);
+  if (doc === null) return null;
+  return stepsOf(doc)
+    .filter((s) => s && typeof s.run === "string")
+    .map((s) => s.run);
+}
+
+/**
+ * Every place `continue-on-error` is switched ON, at JOB or STEP level, across
+ * the whole file — an empty list means the workflow cannot silently swallow a
+ * failure.
+ *
+ * `continue-on-error: true` on a gate step is a "gate that cannot fail": the
+ * step runs, fails, and the job goes green anyway. It was asserted absent for
+ * docs.yml and NOWHERE for site-ci.yml — yet site-ci.yml IS the pull-request
+ * gate, so the same line on its `npm test` step turns the whole guardrail suite
+ * into decoration with the check still reporting success. This reads it off the
+ * parsed object, so quoting (`'true'`), flow style and a job-level grant are all
+ * covered, and a value of literal `false` (the safe, explicit default) is not a
+ * grant. Null (an unparseable file) FIRES.
+ */
+export function continueOnErrorGrants(yaml) {
+  const doc = parseWorkflow(yaml);
+  if (doc === null) return null;
+  const on = (v) => v !== undefined && v !== false && v !== "false";
+  const grants = [];
+  for (const [name, job] of Object.entries(
+    doc.jobs && typeof doc.jobs === "object" ? doc.jobs : {},
+  )) {
+    if (job && typeof job === "object" && "continue-on-error" in job && on(job["continue-on-error"])) {
+      grants.push(`job ${name}`);
+    }
+    const steps = job && Array.isArray(job.steps) ? job.steps : [];
+    steps.forEach((step, i) => {
+      if (step && typeof step === "object" && "continue-on-error" in step && on(step["continue-on-error"])) {
+        grants.push(`${name}[${i}]${step.name ? ` ${step.name}` : ""}`);
+      }
+    });
+  }
+  return grants;
 }
 
 /**
@@ -233,6 +365,12 @@ const SETS = {
   ciPermissions: { allowed: ["contents: read"] },
   ciUses: { allowed: ["actions/checkout@v4", "actions/setup-node@v4"] },
   ciRun: { allowed: ["npm ci", "npm run build", "npm test"] },
+  // "and NOTHING may swallow a failure" — the empty set. Pinned for BOTH files
+  // rather than docs.yml alone, which is the asymmetry a fix-4-era gate carried:
+  // continue-on-error was forbidden on the deploy path and left unmentioned on
+  // the pull-request gate that is the whole point of site-ci.yml.
+  docsContinueOnError: { allowed: [] },
+  ciContinueOnError: { allowed: [] },
 };
 
 const sorted = (xs) => [...xs].sort();
@@ -338,19 +476,30 @@ test("docs.yml: the deploy path runs the suite, before it deploys", async () => 
   assert.ok(configure > -1 && deploy > -1, "docs.yml does not deploy at all");
   assert.ok(test_ < configure, "`npm test` runs after Configure Pages");
   assert.ok(test_ < deploy, "`npm test` runs after the deploy");
-  // FIX-2. This absence assertion stood alone: `continue-on-error` appears
-  // nowhere in docs.yml, so the matcher returning false proved nothing about
-  // the matcher. Plant it on the `npm test` step — the one place that would
-  // actually turn the deploy gate into decoration — and require it to be seen.
+  // FIX-2, now PARSE-BASED and pinned as an empty set. This absence assertion
+  // first stood alone; then it was a substring matcher a trailing comment could
+  // false-fire and that could not tell `true` from `false`. It now reads
+  // `continue-on-error` off the parsed workflow, at job AND step level, and
+  // requires the set of ON grants to be empty. Plant it on the `npm test`
+  // step — the one place that would turn the deploy gate into decoration — and
+  // require the EXTRACTOR to see it.
   //
   // `run: npm test` occurs EXACTLY ONCE in docs.yml and not in any comment, so
   // this replace cannot land in prose; `planted()` checks that rather than
   // trusting it.
   const decorated = yml.replace("run: npm test", "run: npm test\n        continue-on-error: true");
   planted(decorated, "continue-on-error: true", "docs.yml, stripped");
-  present("continueOnError", decorated, "control failed: the continue-on-error matcher is dead");
+  fires(
+    "docsContinueOnError",
+    continueOnErrorGrants(decorated),
+    "control failed: the continue-on-error extractor does not see a decorated step",
+  );
 
-  absent("continueOnError", yml, "docs.yml carries continue-on-error: a gate that cannot fail");
+  confinedTo(
+    "docsContinueOnError",
+    continueOnErrorGrants(yml),
+    "docs.yml carries continue-on-error somewhere: a step that fails but is reported green",
+  );
 });
 
 test("site-ci.yml cannot deploy", async () => {
@@ -365,6 +514,46 @@ test("site-ci.yml cannot deploy", async () => {
   absent("pagesPermission", ci, "site-ci.yml grants pages: write");
   absent("deployAction", ci, "site-ci.yml uses a Pages deployment action");
   assert.match(ci, /^permissions:\n[ \t]+contents:[ \t]*read[ \t]*$/m);
+
+  // AND IT CANNOT BE TURNED INTO DECORATION. The continue-on-error claim was
+  // enforced for docs.yml's deploy path and NOWHERE for site-ci.yml — yet
+  // site-ci.yml IS the pull-request gate, so `continue-on-error: true` on its
+  // guardrail-suite step lets `npm test` fail while the check still reports
+  // success. That asymmetry was the exposure; the same empty-set claim is
+  // enforced here too, parse-based so a quoted or job-level grant is caught.
+
+  // CONTROL, step level: decorate the `npm test` step and require the extractor
+  // to see it. `run: npm test` occurs exactly once in site-ci.yml and not in a
+  // comment, so the plant cannot land in prose; `planted()` checks that.
+  const decorated = planted(
+    ci.replace("run: npm test", "run: npm test\n        continue-on-error: true"),
+    "continue-on-error: true",
+    "site-ci.yml, stripped",
+  );
+  fires(
+    "ciContinueOnError",
+    continueOnErrorGrants(decorated),
+    "control failed: the continue-on-error extractor does not see the decorated gate step",
+  );
+
+  // CONTROL, job level: the same hazard one scope up. A parser sees it; a
+  // step-only check would not.
+  const jobDecorated = planted(
+    ci.replace(/^(  build-test:\n)/m, "$1    continue-on-error: true\n"),
+    "continue-on-error: true",
+    "site-ci.yml, stripped",
+  );
+  fires(
+    "ciContinueOnError",
+    continueOnErrorGrants(jobDecorated),
+    "control failed: the continue-on-error extractor does not see a job-level grant",
+  );
+
+  confinedTo(
+    "ciContinueOnError",
+    continueOnErrorGrants(ci),
+    "site-ci.yml carries continue-on-error: its pull-request gate would report success on a failed step",
+  );
 });
 
 test("both workflows install and test the site the way the site is laid out", async () => {
@@ -431,7 +620,7 @@ test("docs.yml is triggered by push and workflow_dispatch and by NOTHING else", 
   // `create:` were both planted and both deployed green. The claim is a
   // "nothing else", so the trigger SET is what gets pinned.
   const yml = code(await read(DOCS));
-  const on = onBlock(yml);
+  const on = triggerKeys(yml);
   assert.ok(on !== null, "docs.yml has no top-level `on:` block — the S1 claim has no subject");
 
   // POSITIVE CONTROLS, one per trigger the header names, planted into the
@@ -443,14 +632,14 @@ test("docs.yml is triggered by push and workflow_dispatch and by NOTHING else", 
     const planted_ = planted(yml.replace(/^on:$/m, `on:\n${block}`), needle, "docs.yml, stripped");
     fires(
       "docsTriggers",
-      blockKeys(onBlock(planted_)),
+      triggerKeys(planted_),
       `control failed: the trigger pin does not see a \`${needle}\` trigger`,
     );
   }
 
   confinedTo(
     "docsTriggers",
-    blockKeys(on),
+    on,
     "docs.yml's trigger list is not exactly [push, workflow_dispatch]. The header explains " +
       "why this deploy is not tag- or release-triggered: the `github-pages` environment " +
       "rejects `v*` refs, so such a deploy fires at release time and dies at the gate",
@@ -459,7 +648,7 @@ test("docs.yml is triggered by push and workflow_dispatch and by NOTHING else", 
 
 test("site-ci.yml is triggered by pull_request and by NOTHING else", async () => {
   const yml = code(await read(SITE_CI));
-  const on = onBlock(yml);
+  const on = triggerKeys(yml);
   assert.ok(on !== null, "site-ci.yml has no top-level `on:` block");
 
   const planted_ = planted(
@@ -469,13 +658,13 @@ test("site-ci.yml is triggered by pull_request and by NOTHING else", async () =>
   );
   fires(
     "ciTriggers",
-    blockKeys(onBlock(planted_)),
+    triggerKeys(planted_),
     "control failed: the trigger pin does not see an added `push:` trigger",
   );
 
   confinedTo(
     "ciTriggers",
-    blockKeys(on),
+    on,
     "site-ci.yml's trigger list is not exactly [pull_request]. It is the pull-request gate " +
       "and it does not deploy; a second trigger here runs it somewhere its `paths:` filter " +
       "was never reasoned about",
