@@ -139,22 +139,30 @@ test("the candidate set is re-derivable by an independent walk", async () => {
 });
 
 test("controls: the drift predicate produces a failure when there is drift", async () => {
-  const surface = await markdownSurface();
-
-  // Positive control — a planted, unclassified doc IS reported.
-  const planted = [...surface, "docs/brand-new-guide.md"].sort();
+  // Both arms run over SYNTHETIC populations, deliberately. An earlier draft
+  // took the negative arm over the repository's real surface, which made this
+  // control fail whenever real drift existed — so planting an unclassified doc
+  // to demonstrate the gate turned two tests red and the demonstration could
+  // not distinguish "the gate fired" from "the control broke". A control tests
+  // the PREDICATE; the repository's current state is what the AC below tests.
+  const planted = [...CLASSIFIED, "docs/brand-new-guide.md"].sort();
   assert.deepEqual(
     unclassifiedOf(planted, CLASSIFIED),
     ["docs/brand-new-guide.md"],
     "the drift predicate did not report a planted unclassified source",
   );
 
-  // Negative control — the real, fully classified surface is clean, so the
-  // predicate is not simply always non-empty.
-  assert.deepEqual(unclassifiedOf(surface, CLASSIFIED), []);
+  // Negative arm: a population that is classified by construction is clean, so
+  // the predicate is not simply always non-empty.
+  assert.deepEqual(
+    unclassifiedOf([...CLASSIFIED].sort(), CLASSIFIED),
+    [],
+    "the drift predicate reported drift in a population that is classified by construction",
+  );
 
-  // And the module's own decision agrees with this file's set difference, on
-  // the planted population as well as the real one.
+  // And the module's own decision agrees with this file's independent set
+  // difference over the real surface — whatever that surface currently is.
+  const surface = await markdownSurface();
   const { unclassified } = await classifyDrift();
   assert.deepEqual(unclassified, unclassifiedOf(surface, CLASSIFIED));
 });
