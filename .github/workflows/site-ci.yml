@@ -13,6 +13,23 @@
 # It builds and tests. It does NOT deploy — deployment is docs.yml, on `main`.
 # site/tests/workflows.test.mjs asserts the absence of every Pages deployment
 # action and of `pages: write` here, with a positive control.
+#
+# EXTERNAL PRECONDITION — NOT ENFORCED BY THE TEST SUITE. The explicit
+# `permissions: { contents: read }` block below caps this workflow's token at
+# `contents: read`, and every unlisted scope (pages, id-token, contents-write)
+# collapses to `none` (GitHub "Workflow syntax → permissions"). That, plus the
+# `ciUses`/`ciPermissions` whitelists in workflows.test.mjs, is what keeps this
+# gate from deploying. But GitHub's docs are ambiguous about which ceiling a
+# reusable-workflow-CALLING job with no job-level `permissions:` inherits, and
+# that ambiguity becomes load-bearing IF the repository setting
+# `default_workflow_permissions` is ever flipped from `read` to `write`. Today
+# that setting is `read` (observed via
+# `gh api repos/ghchinoy/agentskills/actions/permissions/workflow`), so the
+# ceiling is `read` by two independent routes. No test in THIS repo can see a
+# repository setting, so nothing here fails if it is flipped. See
+# reports/phase6-gh-semantics-2.md §(d). If you flip that setting to `write`,
+# re-audit this gate: a job-level reusable-workflow call could then receive a
+# write token the suite does not catch.
 name: site-ci
 
 on:

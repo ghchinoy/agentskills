@@ -27,7 +27,26 @@
 //     in any spelling.
 //   * site-ci.yml uses EXACTLY `actions/checkout` and `actions/setup-node`, and
 //     runs EXACTLY `npm ci`, `npm run build` and `npm test` — so it cannot
-//     deploy by any action or any shell command, named or unnamed.
+//     deploy by any action or any shell command, named or unnamed. This is
+//     enforced across BOTH scopes a `uses:` can occupy: step-level actions
+//     (`steps[].uses`) AND a job-level reusable-workflow call
+//     (`jobs.<id>.uses`), so a second job that calls a reusable workflow is on
+//     the `ciUses` pin like any action.
+//
+// AN EXTERNAL PRECONDITION THIS SUITE DOES NOT — AND CANNOT — ENFORCE. The
+// whitelists above keep site-ci.yml from HOLDING a deploy grant, and its
+// explicit `permissions: { contents: read }` block caps its GITHUB_TOKEN at
+// `contents: read` while that block stands. But the soundness of "site-ci.yml
+// cannot deploy" also rests on the repository setting
+// `default_workflow_permissions` being `read`: GitHub's docs are ambiguous
+// about which ceiling a reusable-workflow-calling job with no job-level
+// `permissions:` inherits, and that ambiguity would become load-bearing if that
+// setting were flipped to `write`. Today it is `read` (observed via
+// `gh api repos/ghchinoy/agentskills/actions/permissions/workflow`), so the
+// ceiling holds by two independent routes. NO TEST BELOW CAN SEE A REPOSITORY
+// SETTING — this is a DEPENDENCY the suite does not enforce, recorded so a
+// soundness verdict resting on it does not expire silently. See
+// reports/phase6-gh-semantics-2.md §(d).
 //
 // Every absence assertion below is paired with a POSITIVE CONTROL that runs the
 // same matcher over text which does contain the forbidden thing. "No
@@ -289,16 +308,30 @@ export function permissionEntries(yaml) {
 
 /**
  * Every `uses:` value in the file — the actions this workflow can run, across
- * ALL jobs and steps. Parsed rather than matched, so a trailing comment, a
- * quoted value or a flow-style step (`- {uses: X}`) cannot hide an action from
- * the pin. Null (an unparseable file) FIRES.
+ * ALL jobs and steps, AND every reusable-workflow call. Parsed rather than
+ * matched, so a trailing comment, a quoted value or a flow-style step (`- {uses:
+ * X}`) cannot hide an action from the pin. Null (an unparseable file) FIRES.
+ *
+ * A `uses:` is written in TWO places, not one: at STEP level (`steps[].uses`, an
+ * action) and at JOB level (`jobs.<id>.uses`, a whole reusable workflow called
+ * as a job). A job-level `uses:` runs code this workflow did not write just as a
+ * step-level one does, and "site-ci.yml uses EXACTLY checkout and setup-node" is
+ * false the moment a second job calls a reusable workflow — wherever the call is
+ * written. Reading only `steps[].uses` left that claim asserted-but-unenforced:
+ * a reusable-workflow call passed the `ciUses` pin while the register said it
+ * could not exist. Both scopes are collected here so the pin is a claim about
+ * every action-or-workflow GitHub would RUN, not only the step-level ones.
  */
 export function usesValues(yaml) {
   const doc = parseWorkflow(yaml);
   if (doc === null) return null;
-  return stepsOf(doc)
+  const jobUses = jobsOf(doc)
+    .filter((j) => j && typeof j.uses === "string")
+    .map((j) => j.uses);
+  const stepUses = stepsOf(doc)
     .filter((s) => s && typeof s.uses === "string")
     .map((s) => s.uses);
+  return [...jobUses, ...stepUses];
 }
 
 /**
@@ -753,6 +786,22 @@ test("site-ci.yml runs exactly the actions and commands a build-and-test job nee
     "ciRun",
     runValues(shellDeploy),
     "control failed: the command pin does not see a deploy run as a shell command",
+  );
+
+  // The one that is not a STEP at all: a second job that is a reusable-workflow
+  // call (`jobs.<id>.uses:`). That runs code this workflow did not write, and a
+  // step-only extractor was measured blind to it — the register said site-ci.yml
+  // uses exactly checkout and setup-node while a job-level `uses:` walked past
+  // the pin. This control plants that call and requires the extractor to see it.
+  const reusableCall = planted(
+    ci + "\n  deploy:\n    needs: build-test\n    uses: ./.github/workflows/reusable-deploy.yml@main\n",
+    "uses: ./.github/workflows/reusable-deploy.yml@main",
+    "site-ci.yml, stripped",
+  );
+  fires(
+    "ciUses",
+    usesValues(reusableCall),
+    "control failed: the action pin does not see a job-level reusable-workflow `uses:`",
   );
 
   confinedTo(
