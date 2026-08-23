@@ -1,0 +1,10 @@
+# Astro / Starlight build artifacts.
+dist/
+.astro/
+node_modules/
+
+# Content copied in from the repository's own docs at build time by
+# scripts/prepare-content.mjs. Regenerated on every build, never edited by hand,
+# never committed — a committed copy is a second copy of the prose, and a second
+# copy drifts from the source it was taken from.
+src/content/docs/_generated/

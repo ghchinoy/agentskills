@@ -7,7 +7,11 @@ Welcome to the **`agentskills`** user manual. This guide outlines everything you
 ## 📋 Prerequisites
 
 Before using `agentskills`, ensure your system meets the following requirements:
-*   **Go Runtime:** Go 1.22 or higher installed and added to your `$PATH`.
+*   **Go Runtime:** Go 1.26.4 or higher installed and added to your `$PATH`. This is the
+    version `go.mod` declares, and the Go toolchain enforces it: a build on an older
+    toolchain fails with `go.mod requires go >= 1.26.4` unless it is allowed to download
+    the declared version automatically (the default `GOTOOLCHAIN=auto` does;
+    `GOTOOLCHAIN=local` does not).
 *   **Google Cloud SDK (For Vertex AI Backend):** The `gcloud` command line interface installed.
 *   **GitHub Access:** Public repositories containing a `GEMINI.md` file in their root directories (or matching local files).
 

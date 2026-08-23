@@ -1,0 +1,134 @@
+# docs.yml — build the agentskills CLI docs site and publish it to GitHub Pages.
+#
+# This is the first workflow this repository has ever had (proposal §4.2, J1).
+#
+# TRIGGER: push to `main`. Deliberately NOT a tag, and this is not a style
+# preference. A sibling project triggers its equivalent on `push: tags: ['v*']`
+# and its `github-pages` environment protection REJECTS `v*` tag refs, so the
+# deploy fires at release time and dies at the environment gate. This repo's
+# releases are hand-tagged from a laptop (docs/releasing.md), which would make a
+# tag-gated deploy both environment-blocked and dependent on a manual step. Do
+# not "improve" this into a tag or release trigger.
+#
+# THE TRIGGER LIST IS NOT THE WHOLE STORY. `workflow_dispatch` has no ref
+# restriction: GitHub's "Run workflow" selector and `gh workflow run --ref <tag>`
+# both accept a TAG, which lands `refs/tags/...` at the environment gate and
+# reproduces the failure above through the one trigger that looks harmless. The
+# job-level `if:` on build-deploy is what closes that, not the trigger list.
+#
+# SCOPE: this workflow tests what it deploys. Delegating the suite to
+# site-ci.yml on the pull request would leave a hole, because site-ci.yml
+# triggers only on `pull_request`: a direct push to `main`, an admin merge, or a
+# merge whose paths filter did not match all deployed content each reaches
+# `deploy-pages` having run zero tests. Branch protection would be the better
+# instrument, but repository SETTINGS are the owner's and are not ours to
+# change; a workflow file is the authority we have. site/tests/workflows.test.mjs
+# asserts this step exists, runs the same command as site-ci.yml, and precedes
+# the deploy.
+name: docs
+
+on:
+  push:
+    branches: [main]
+    # What the site is built FROM, plus the site itself, plus this file
+    # (proposal §10.3). `docs/**` is the load-bearing entry: the published pages
+    # ARE the repository's docs, so editing one has to redeploy them.
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'skills/**'
+      - '.goreleaser.yaml'
+      - 'site/**'
+      - '.github/workflows/docs.yml'
+  # Redeploy without a content change — e.g. after a Pages settings change.
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and an in-flight one is allowed to FINISH.
+#
+# `cancel-in-progress: false` DEVIATES FROM PROPOSAL §10.2, which prescribes
+# `true`. The deviation is deliberate, was ruled by the EM during the Phase 2
+# review of the sibling site, and is recorded here so a later phase reading
+# §10.2 does not helpfully "restore" it. GitHub's own "Deploy static content to
+# Pages" starter ships `false`, commented "do NOT cancel in-progress runs as we
+# want to allow these production deployments to complete". The concrete hazard
+# with `true` is that a second push to `main` inside the window kills run #1
+# part-way through `deploy-pages`, leaving a deployment in flight and a run that
+# is neither green nor red. Superseding a queued BUILD is cheap; superseding a
+# running DEPLOY is not the same trade.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    # THE REF GUARD, AND IT IS AN EQUALITY TEST ON PURPOSE. `push` above can
+    # only be `main`, so this exists for `workflow_dispatch`, which accepts any
+    # ref including a tag. It must not be written with `startsWith`:
+    # `startsWith(github.ref, 'refs/heads/main')` admits `refs/heads/main-hotfix`
+    # and every other branch merely PREFIXED "main", which would deploy a
+    # working branch to production. Equality admits exactly one ref.
+    # site/tests/workflows.test.mjs pins the form.
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # site/package.json declares engines.node ">=22.19.0" (Astro's undici
+          # floor); "22" resolves to the current 22.x, which satisfies it.
+          # site/tests/workflows.test.mjs pins the two to each other.
+          node-version: '22'
+          cache: npm
+          # site/ is a self-contained npm project, NOT a workspace member, so
+          # both the cache key and `npm ci` are scoped to site/ (proposal §10.4).
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: site
+
+      # `npm run build` runs the `prebuild` hook, which is
+      # scripts/prepare-content.mjs — the allowlist prebuild. An unclassified
+      # docs/*.md fails HERE, before anything is published.
+      - name: Build the site
+        run: npm run build
+        working-directory: site
+
+      # THE GATE, ON THE PATH THAT DEPLOYS. After the build, because most of the
+      # suite asserts on the bytes in dist/; before Configure Pages, so a red
+      # suite stops the run without having touched Pages deployment state.
+      # Identical command to site-ci.yml, deliberately: two gates running
+      # different subsets is a gate whose coverage nobody can state.
+      - name: Run the guardrail suite
+        run: npm test
+        working-directory: site
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          # This repository has never had a Pages deployment, so this is the
+          # step that turns Pages on for it on the first run — no manual
+          # settings change needed, which matters because repository settings
+          # are the owner's.
+          enablement: true
+
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -6,7 +6,9 @@ This document outlines the development workflow, local setup instructions, testi
 
 ## 📋 Prerequisites
 
-* **Go Runtime:** Go 1.22+ installed and available on your `$PATH`.
+* **Go Runtime:** Go 1.26.4+ installed and available on your `$PATH` — the version
+  `go.mod` declares. An older toolchain is refused (`go.mod requires go >= 1.26.4`)
+  unless `GOTOOLCHAIN` is left at its default `auto`, which downloads it on demand.
 * **Google Cloud SDK:** `gcloud` CLI installed with Application Default Credentials configured (for Vertex AI testing).
 * **Beads (`bd`):** Used for internal task tracking and quality gates.
 * **GolangCI-Lint:** (Optional, for linting) `go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest`.
